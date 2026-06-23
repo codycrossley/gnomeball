@@ -1,0 +1,121 @@
+package gay.runescape.gnomeball;
+
+import com.google.gson.JsonObject;
+import net.runelite.api.coords.WorldPoint;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+public class TileReducer
+{
+    public static final class TileEntry
+    {
+        public final WorldPoint point;
+        public final String tileType;
+        public final String color;
+
+        public TileEntry(WorldPoint point, String tileType, String color)
+        {
+            this.point = point;
+            this.tileType = tileType;
+            this.color = color;
+        }
+    }
+
+    private final ConcurrentHashMap<String, TileEntry> tiles = new ConcurrentHashMap<>();
+
+    public void apply(ApiClient.EventOut e)
+    {
+        if (e == null || e.type == null) return;
+        String type = e.type.toUpperCase(Locale.ROOT);
+
+        if ("TILE_MARKED".equals(type))
+        {
+            Integer x = safeInt(e.payload, "x");
+            Integer y = safeInt(e.payload, "y");
+            Integer plane = safeInt(e.payload, "plane");
+            if (x == null || y == null || plane == null) return;
+
+            String tileType = safeStr(e.payload, "tileType");
+            if (tileType == null) tileType = "STANDARD";
+            String color = safeStr(e.payload, "color");
+
+            tiles.put(key(x, y, plane, tileType),
+                new TileEntry(new WorldPoint(x, y, plane), tileType, color));
+        }
+        else if ("TILE_UNMARKED".equals(type))
+        {
+            Integer x = safeInt(e.payload, "x");
+            Integer y = safeInt(e.payload, "y");
+            Integer plane = safeInt(e.payload, "plane");
+            if (x == null || y == null || plane == null) return;
+
+            String tileType = safeStr(e.payload, "tileType");
+            if (tileType != null)
+            {
+                tiles.remove(key(x, y, plane, tileType));
+            }
+            else
+            {
+                String prefix = x + ":" + y + ":" + plane + ":";
+                tiles.keySet().removeIf(k -> k.startsWith(prefix));
+            }
+        }
+    }
+
+    public void loadAll(List<ApiClient.TileOut> tileList)
+    {
+        tiles.clear();
+        if (tileList == null) return;
+        for (ApiClient.TileOut t : tileList)
+        {
+            if (t == null) continue;
+            String tt = t.tileType != null ? t.tileType : "STANDARD";
+            tiles.put(key(t.x, t.y, t.plane, tt),
+                new TileEntry(new WorldPoint(t.x, t.y, t.plane), tt, t.color));
+        }
+    }
+
+    public void reset()
+    {
+        tiles.clear();
+    }
+
+    public List<TileEntry> snapshot()
+    {
+        return Collections.unmodifiableList(new ArrayList<>(tiles.values()));
+    }
+
+    public boolean hasMarker(WorldPoint wp, String tileType)
+    {
+        if (wp == null) return false;
+        return tiles.containsKey(key(wp.getX(), wp.getY(), wp.getPlane(), tileType));
+    }
+
+    public boolean hasAnyMarker(WorldPoint wp)
+    {
+        if (wp == null) return false;
+        String prefix = wp.getX() + ":" + wp.getY() + ":" + wp.getPlane() + ":";
+        for (String k : tiles.keySet())
+        {
+            if (k.startsWith(prefix)) return true;
+        }
+        return false;
+    }
+
+    private static String key(int x, int y, int plane, String tileType)
+    {
+        return x + ":" + y + ":" + plane + ":" + tileType;
+    }
+
+    private static String safeStr(JsonObject o, String k)
+    {
+        return (o != null && o.has(k) && !o.get(k).isJsonNull()) ? o.get(k).getAsString() : null;
+    }
+
+    private static Integer safeInt(JsonObject o, String k)
+    {
+        try { return (o != null && o.has(k) && !o.get(k).isJsonNull()) ? o.get(k).getAsInt() : null; }
+        catch (Exception ignored) { return null; }
+    }
+}
