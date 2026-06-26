@@ -64,6 +64,11 @@ public class GnomeballPanel extends PluginPanel
     // Host in-game (ACTIVE only)
     private final JButton endGameBtn   = new JButton("End Game");
 
+    // Referee controls (ACTIVE, referee role)
+    private final JPanel  refereePanel    = new JPanel();
+    private final JButton whistleBtn      = new JButton("Blow Whistle");
+    private final JButton timerToggleBtn  = new JButton("STOP");
+
     // All players
     private final JButton leaveGameBtn = new JButton("Leave Game");
 
@@ -426,6 +431,34 @@ public class GnomeballPanel extends PluginPanel
         endGameBtn.addActionListener(e -> plugin.onEndClicked());
         card.add(endGameBtn);
 
+        // Referee controls (ACTIVE, referee role)
+        refereePanel.setLayout(new BoxLayout(refereePanel, BoxLayout.Y_AXIS));
+        refereePanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        refereePanel.setAlignmentX(LEFT_ALIGNMENT);
+        refereePanel.setVisible(false);
+
+        JLabel refTitle = new JLabel("REFEREE");
+        refTitle.setForeground(COLOR_REFEREE);
+        refTitle.setFont(FontManager.getRunescapeSmallFont());
+        refTitle.setAlignmentX(LEFT_ALIGNMENT);
+
+        whistleBtn.setAlignmentX(LEFT_ALIGNMENT);
+        whistleBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        whistleBtn.setForeground(COLOR_REFEREE);
+        whistleBtn.addActionListener(e -> plugin.onBlowWhistleClicked());
+
+        timerToggleBtn.setAlignmentX(LEFT_ALIGNMENT);
+        timerToggleBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        timerToggleBtn.addActionListener(e -> plugin.onTimerStartStopClicked());
+
+        refereePanel.add(refTitle);
+        refereePanel.add(Box.createVerticalStrut(4));
+        refereePanel.add(whistleBtn);
+        refereePanel.add(Box.createVerticalStrut(4));
+        refereePanel.add(timerToggleBtn);
+        card.add(Box.createVerticalStrut(4));
+        card.add(refereePanel);
+
         // Leave game (all)
         leaveGameBtn.setAlignmentX(LEFT_ALIGNMENT);
         leaveGameBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
@@ -463,6 +496,7 @@ public class GnomeballPanel extends PluginPanel
                 refreshGridButton();
                 hostPreStartPanel.setVisible(isHost);
                 endGameBtn.setVisible(false);
+                refereePanel.setVisible(false);
                 leaveGameBtn.setVisible(true);
                 refreshRoster(plugin.getRoster().snapshot());
                 break;
@@ -476,6 +510,8 @@ public class GnomeballPanel extends PluginPanel
                 refreshGridButton();
                 hostPreStartPanel.setVisible(false);
                 endGameBtn.setVisible(isHost);
+                refereePanel.setVisible(plugin.isReferee());
+                timerToggleBtn.setText(plugin.isTimerPaused() ? "START" : "STOP");
                 leaveGameBtn.setVisible(true);
                 refreshRoster(plugin.getRoster().snapshot());
                 break;
@@ -486,6 +522,7 @@ public class GnomeballPanel extends PluginPanel
                 refreshScoreboard();
                 hostPreStartPanel.setVisible(false);
                 endGameBtn.setVisible(false);
+                refereePanel.setVisible(false);
                 leaveGameBtn.setVisible(true);
                 refreshRoster(plugin.getRoster().snapshot());
                 break;

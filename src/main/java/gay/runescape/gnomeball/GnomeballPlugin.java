@@ -106,6 +106,13 @@ public class GnomeballPlugin extends Plugin
     private volatile int gridHeight = 5;
     private volatile String zoneTeam = null; // "TEAM_A" or "TEAM_B"
     private final Set<WorldPoint> zoneTiles = new HashSet<>();
+    private volatile long goalFlashUntil = 0;
+    private volatile String goalFlashTeam = null;
+    private volatile int goalFlashOldScore = 0;
+    private volatile int goalFlashNewScore = 0;
+    private volatile long whistleFlashUntil = 0;
+    private volatile boolean timerPaused = false;
+    private volatile long pausedRemainingMs = 0;
 
     // -------------------------------------------------------------------------
     // Lifecycle
@@ -129,7 +136,7 @@ public class GnomeballPlugin extends Plugin
         clientToolbar.addNavigation(navButton);
 
         playerOverlay = new PlayerOverlay(client, config, this, rosterReducer);
-        timerOverlay = new TimerOverlay(this);
+        timerOverlay = new TimerOverlay(client, this);
         tileOverlay = new TileOverlay(client, config, this, tileReducer);
         overlayManager.add(playerOverlay);
         overlayManager.add(timerOverlay);
@@ -196,21 +203,13 @@ public class GnomeballPlugin extends Plugin
         if (event.getGameState() == GameState.LOGIN_SCREEN
             || event.getGameState() == GameState.HOPPING)
         {
-            if (poller.isRunning())
-            {
-                final String gid = gameId;
-                final String rsn = localRsn();
-                if (gid != null && rsn != null)
-                {
-                    executor.submit(() ->
-                    {
-                        try { apiClient.leaveGame(gid, rsn); }
-                        catch (Exception ex) { log.debug("Leave on logout: {}", ex.getMessage()); }
-                    });
-                }
-                poller.stop();
-            }
-            resetState();
+            poller.stop();
+            stopPeriodicTasks();
+            gameId = null; writeKey = null; joinCode = null; hostRsn = null;
+            phase = GamePhase.DISCONNECTED; deadlineMs = 0; winner = null;
+            teamAName = "Team A"; teamBName = "Team B"; teamAScore = 0; teamBScore = 0;
+            if (rosterReducer != null) rosterReducer.reset();
+            if (tileReducer != null) tileReducer.reset();
             SwingUtilities.invokeLater(() -> panel.refresh());
         }
     }
@@ -524,6 +523,8 @@ public class GnomeballPlugin extends Plugin
             case "GAME_STARTED":
             {
                 phase = GamePhase.ACTIVE;
+                timerPaused = false;
+                pausedRemainingMs = 0;
                 if (e.payload != null)
                 {
                     long startMs = parseEpochMs(safeStr(e.payload, "startTime"));
@@ -555,8 +556,53 @@ public class GnomeballPlugin extends Plugin
             {
                 String team = safeStr(e.payload, "team");
                 int score = safeInt(e.payload, "score");
-                if ("TEAM_A".equals(team)) teamAScore = score;
-                else if ("TEAM_B".equals(team)) teamBScore = score;
+                if ("TEAM_A".equals(team))
+                {
+                    if (score > teamAScore)
+                    {
+                        goalFlashTeam = "TEAM_A";
+                        goalFlashOldScore = teamAScore;
+                        goalFlashNewScore = score;
+                        goalFlashUntil = System.currentTimeMillis() + 3000;
+                    }
+                    teamAScore = score;
+                }
+                else if ("TEAM_B".equals(team))
+                {
+                    if (score > teamBScore)
+                    {
+                        goalFlashTeam = "TEAM_B";
+                        goalFlashOldScore = teamBScore;
+                        goalFlashNewScore = score;
+                        goalFlashUntil = System.currentTimeMillis() + 3000;
+                    }
+                    teamBScore = score;
+                }
+                break;
+            }
+            case "WHISTLE_BLOWN":
+            {
+                long rem = safeLong(e.payload, "remainingMs");
+                if (!timerPaused)
+                {
+                    pausedRemainingMs = rem > 0 ? rem : Math.max(0, deadlineMs - System.currentTimeMillis());
+                    timerPaused = true;
+                }
+                whistleFlashUntil = System.currentTimeMillis() + 3000;
+                break;
+            }
+            case "TIMER_PAUSED":
+            {
+                long rem = safeLong(e.payload, "remainingMs");
+                if (rem > 0) pausedRemainingMs = rem;
+                timerPaused = true;
+                break;
+            }
+            case "TIMER_RESUMED":
+            {
+                long dl = safeLong(e.payload, "deadlineMs");
+                if (dl > 0) deadlineMs = dl;
+                timerPaused = false;
                 break;
             }
             case "PLAYER_JOINED":
@@ -590,8 +636,43 @@ public class GnomeballPlugin extends Plugin
         rosterReducer.syncFromRoster(snap.players);
         if (snap.teamAName != null) teamAName = snap.teamAName;
         if (snap.teamBName != null) teamBName = snap.teamBName;
+        if (snap.teamAScore > teamAScore)
+        {
+            goalFlashTeam = "TEAM_A";
+            goalFlashOldScore = teamAScore;
+            goalFlashNewScore = snap.teamAScore;
+            goalFlashUntil = System.currentTimeMillis() + 3000;
+        }
+        if (snap.teamBScore > teamBScore)
+        {
+            goalFlashTeam = "TEAM_B";
+            goalFlashOldScore = teamBScore;
+            goalFlashNewScore = snap.teamBScore;
+            goalFlashUntil = System.currentTimeMillis() + 3000;
+        }
         teamAScore = snap.teamAScore;
         teamBScore = snap.teamBScore;
+
+        if (snap.status != null)
+        {
+            try { phase = GamePhase.valueOf(snap.status); }
+            catch (IllegalArgumentException ignored) {}
+        }
+        if (snap.startTime != null && snap.durationSeconds != null && snap.durationSeconds > 0)
+        {
+            long startMs = parseEpochMs(snap.startTime);
+            if (startMs > 0) deadlineMs = startMs + (snap.durationSeconds * 1000L);
+        }
+
+        if (Boolean.TRUE.equals(snap.paused))
+        {
+            timerPaused = true;
+            if (snap.pausedRemainingMs != null) pausedRemainingMs = snap.pausedRemainingMs;
+        }
+        else
+        {
+            timerPaused = false;
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -769,6 +850,80 @@ public class GnomeballPlugin extends Plugin
     public Set<WorldPoint> getZoneTiles()  { return zoneTiles; }
     public boolean       isZoneMode()      { return zoneTeam != null; }
 
+    public long          getGoalFlashUntil()    { return goalFlashUntil; }
+    public String        getGoalFlashTeam()     { return goalFlashTeam; }
+    public int           getGoalFlashOldScore() { return goalFlashOldScore; }
+    public int           getGoalFlashNewScore() { return goalFlashNewScore; }
+    public long          getWhistleFlashUntil() { return whistleFlashUntil; }
+    public boolean       isTimerPaused()        { return timerPaused; }
+    public long          getPausedRemainingMs() { return pausedRemainingMs; }
+
+    public boolean isReferee()
+    {
+        String rsn = localRsn();
+        if (rsn == null) return false;
+        return rosterReducer.getRole(rsn) == GnomeballRole.REFEREE;
+    }
+
+    public void onBlowWhistleClicked()
+    {
+        final String gid = gameId;
+        final String rsn = localRsn();
+        if (gid == null || rsn == null) return;
+
+        // Optimistic local update so the referee sees it immediately
+        final long remaining = timerPaused ? pausedRemainingMs
+            : Math.max(0, deadlineMs - System.currentTimeMillis());
+        if (!timerPaused)
+        {
+            pausedRemainingMs = remaining;
+            timerPaused = true;
+        }
+        whistleFlashUntil = System.currentTimeMillis() + 3000;
+        SwingUtilities.invokeLater(() -> panel.refresh());
+
+        executor.submit(() ->
+        {
+            try { apiClient.blowWhistle(gid, rsn, remaining); }
+            catch (Exception ex) { log.warn("Blow whistle failed: {}", ex.getMessage()); }
+        });
+    }
+
+    public void onTimerStartStopClicked()
+    {
+        final String gid = gameId;
+        final String rsn = localRsn();
+        if (gid == null || rsn == null) return;
+
+        if (timerPaused)
+        {
+            // Optimistic resume
+            deadlineMs = System.currentTimeMillis() + pausedRemainingMs;
+            timerPaused = false;
+            SwingUtilities.invokeLater(() -> panel.refresh());
+
+            executor.submit(() ->
+            {
+                try { apiClient.resumeTimer(gid, rsn); }
+                catch (Exception ex) { log.warn("Resume timer failed: {}", ex.getMessage()); }
+            });
+        }
+        else
+        {
+            // Optimistic pause
+            final long remaining = Math.max(0, deadlineMs - System.currentTimeMillis());
+            pausedRemainingMs = remaining;
+            timerPaused = true;
+            SwingUtilities.invokeLater(() -> panel.refresh());
+
+            executor.submit(() ->
+            {
+                try { apiClient.pauseTimer(gid, rsn, remaining); }
+                catch (Exception ex) { log.warn("Pause timer failed: {}", ex.getMessage()); }
+            });
+        }
+    }
+
     public void startZoneMode(String team)
     {
         cancelGridMode();
@@ -899,6 +1054,7 @@ public class GnomeballPlugin extends Plugin
         gameId = null; writeKey = null; joinCode = null; hostRsn = null;
         phase = GamePhase.DISCONNECTED; deadlineMs = 0; winner = null;
         teamAName = "Team A"; teamBName = "Team B"; teamAScore = 0; teamBScore = 0;
+        timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
     }
@@ -923,6 +1079,12 @@ public class GnomeballPlugin extends Plugin
     private static int safeInt(com.google.gson.JsonObject o, String key)
     {
         try { return (o != null && o.has(key) && !o.get(key).isJsonNull()) ? o.get(key).getAsInt() : 0; }
+        catch (Exception ignored) { return 0; }
+    }
+
+    private static long safeLong(com.google.gson.JsonObject o, String key)
+    {
+        try { return (o != null && o.has(key) && !o.get(key).isJsonNull()) ? o.get(key).getAsLong() : 0; }
         catch (Exception ignored) { return 0; }
     }
 

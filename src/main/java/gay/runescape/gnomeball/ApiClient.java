@@ -184,6 +184,44 @@ public class ApiClient
         }
     }
 
+    public void blowWhistle(String gameId, String playerRsn, long remainingMs) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("remainingMs", remainingMs);
+
+        try (Response resp = post("/v1/games/" + gameId + "/whistle", body, null))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Whistle failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    public void pauseTimer(String gameId, String playerRsn, long remainingMs) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("remainingMs", remainingMs);
+
+        try (Response resp = post("/v1/games/" + gameId + "/pause-timer", body, null))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Pause timer failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    public void resumeTimer(String gameId, String playerRsn) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/resume-timer", body, null))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Resume timer failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     public void sendHeartbeat(String gameId, String playerRsn) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -310,6 +348,11 @@ public class ApiClient
     {
         public String gameId;
         public int latestSeq;
+        public String status;
+        public String startTime;
+        public Integer durationSeconds;
+        public Boolean paused;
+        public Long pausedRemainingMs;
         public String teamAName;
         public String teamBName;
         public int teamAScore;
