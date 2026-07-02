@@ -14,7 +14,7 @@ import net.runelite.client.ui.*;
 public class GnomeballPanel extends PluginPanel
 {
     private static final int BORDER = 8;
-    private static final Color COLOR_REFEREE = new Color(220, 180, 40);
+    private static final Color COLOR_REFEREE = new Color(60, 179, 74);
     private static final Color COLOR_TEAM_A  = new Color(60, 120, 220);
     private static final Color COLOR_TEAM_B  = new Color(200, 60, 60);
     private static final Color ROW_EVEN      = new Color(40, 40, 40);
@@ -531,7 +531,7 @@ public class GnomeballPanel extends PluginPanel
 
     private void refreshRoster(List<RosterReducer.RosterEntry> entries)
     {
-        String key = buildRosterKey(entries) + plugin.getTeamAName() + '|' + plugin.getTeamBName();
+        String key = buildRosterKey(entries) + plugin.getTeamAName() + '|' + plugin.getTeamBName() + '|' + plugin.getPhase() + '|' + plugin.getBallHolder();
         if (key.equals(lastRosterKey)) return;
         lastRosterKey = key;
 
@@ -591,6 +591,26 @@ public class GnomeballPanel extends PluginPanel
     private JPopupMenu buildRolePopup(String rsn, GnomeballRole current)
     {
         JPopupMenu popup = new JPopupMenu();
+
+        if (current != GnomeballRole.REFEREE && plugin.getPhase() == GamePhase.ACTIVE)
+        {
+            String bh = plugin.getBallHolder();
+            boolean hasBall = bh != null && bh.equalsIgnoreCase(rsn);
+            if (hasBall)
+            {
+                JMenuItem removeBall = new JMenuItem("Remove Ball");
+                removeBall.addActionListener(e -> plugin.onClearBallClicked());
+                popup.add(removeBall);
+            }
+            else
+            {
+                JMenuItem assignBall = new JMenuItem("Assign Ball");
+                assignBall.addActionListener(e -> plugin.onAssignBallClicked(rsn));
+                popup.add(assignBall);
+            }
+            popup.addSeparator();
+        }
+
         for (GnomeballRole role : GnomeballRole.values())
         {
             if (role == current) continue;

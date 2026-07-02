@@ -96,6 +96,27 @@ public class ApiClient
         }
     }
 
+    public void clearBall(String gameId, String writeKey) throws IOException
+    {
+        try (Response resp = post("/v1/games/" + gameId + "/clear-ball", new JsonObject(), writeKey))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Clear ball failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    public void assignBall(String gameId, String writeKey, String playerRsn) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/assign-ball", body, writeKey))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Assign ball failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     public void assignRole(String gameId, String writeKey, String playerRsn, GnomeballRole role) throws IOException
     {
         JsonObject body = new JsonObject();
@@ -349,6 +370,7 @@ public class ApiClient
         public String gameId;
         public int latestSeq;
         public String status;
+        public String ballHolder;
         public String startTime;
         public Integer durationSeconds;
         public Boolean paused;

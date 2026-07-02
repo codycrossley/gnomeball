@@ -12,7 +12,7 @@ public class TimerOverlay extends Overlay
     private static final Color COLOR_DANGER   = new Color(255,  60,  60, 220);
     private static final Color COLOR_TEAM_A   = new Color(17, 104, 253, 220);
     private static final Color COLOR_TEAM_B   = new Color(200, 60, 60, 220);
-    private static final Color COLOR_REFEREE  = new Color(220, 180, 40, 220);
+    private static final Color COLOR_REFEREE  = new Color(60, 179, 74, 220);
     private static final Color BG_COLOR       = new Color(0, 0, 0, 140);
     private static final int   WARN_SECS     = 30;
     private static final int   DANGER_SECS   = 10;

@@ -10,7 +10,8 @@ import net.runelite.client.util.Text;
 
 public class PlayerOverlay extends Overlay
 {
-    private static final Color COLOR_REFEREE = new Color(220, 180, 40);
+    private static final Color COLOR_REFEREE = new Color(60, 179, 74);
+    private static final Color COLOR_BALL    = new Color(255, 210, 0);
     private static final Color COLOR_TEAM_A  = new Color(17, 104, 253);
     private static final Color COLOR_TEAM_B  = new Color(200, 60, 60);
 
@@ -62,6 +63,19 @@ public class PlayerOverlay extends Overlay
             if (loc == null) continue;
 
             Color color = roleColor(role);
+
+            String bh = plugin.getBallHolder();
+            boolean hasBall = bh != null && bh.equalsIgnoreCase(rsn);
+
+            if (hasBall)
+            {
+                int cx = loc.getX() + textWidth / 2;
+                int cy = loc.getY() - textHeight - 6;
+                g.setColor(Color.BLACK);
+                g.fillOval(cx - 6, cy - 6, 12, 12);
+                g.setColor(COLOR_BALL);
+                g.fillOval(cx - 5, cy - 5, 10, 10);
+            }
 
             g.setColor(Color.BLACK);
             g.drawString(text, loc.getX() + 1, loc.getY() + 1);

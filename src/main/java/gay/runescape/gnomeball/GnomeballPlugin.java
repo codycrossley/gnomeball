@@ -48,7 +48,7 @@ public class GnomeballPlugin extends Plugin
     private static final String KEY_PHASE     = "activePhase";
     private static final String KEY_DEADLINE  = "activeDeadlineMs";
 
-    private static final String COLOR_REFEREE = "DCB428";
+    private static final String COLOR_REFEREE = "3CB34A";
     private static final String COLOR_TEAM_A  = "3C78DC";
     private static final String COLOR_TEAM_B  = "C83C3C";
 
@@ -106,6 +106,7 @@ public class GnomeballPlugin extends Plugin
     private volatile int gridHeight = 5;
     private volatile String zoneTeam = null; // "TEAM_A" or "TEAM_B"
     private final Set<WorldPoint> zoneTiles = new HashSet<>();
+    private volatile String ballHolder   = null;
     private volatile long goalFlashUntil = 0;
     private volatile String goalFlashTeam = null;
     private volatile int goalFlashOldScore = 0;
@@ -605,6 +606,16 @@ public class GnomeballPlugin extends Plugin
                 timerPaused = false;
                 break;
             }
+            case "BALL_ASSIGNED":
+            {
+                ballHolder = safeStr(e.payload, "player");
+                break;
+            }
+            case "BALL_CLEARED":
+            {
+                ballHolder = null;
+                break;
+            }
             case "PLAYER_JOINED":
             case "ROLE_ASSIGNED":
             case "PLAYER_LEFT":
@@ -652,6 +663,7 @@ public class GnomeballPlugin extends Plugin
         }
         teamAScore = snap.teamAScore;
         teamBScore = snap.teamBScore;
+        if (snap.ballHolder != null) ballHolder = snap.ballHolder;
 
         if (snap.status != null)
         {
@@ -792,6 +804,26 @@ public class GnomeballPlugin extends Plugin
         });
     }
 
+    public void onClearBallClicked()
+    {
+        if (!isHost() || gameId == null) return;
+        executor.submit(() ->
+        {
+            try { apiClient.clearBall(gameId, writeKey); }
+            catch (Exception ex) { log.warn("Clear ball failed: {}", ex.getMessage()); }
+        });
+    }
+
+    public void onAssignBallClicked(String playerRsn)
+    {
+        if (!isHost() || gameId == null) return;
+        executor.submit(() ->
+        {
+            try { apiClient.assignBall(gameId, writeKey, playerRsn); }
+            catch (Exception ex) { log.warn("Assign ball failed: {}", ex.getMessage()); }
+        });
+    }
+
     public void onAssignRoleClicked(String playerRsn, GnomeballRole role)
     {
         if (!isHost() || gameId == null) return;
@@ -857,6 +889,7 @@ public class GnomeballPlugin extends Plugin
     public long          getWhistleFlashUntil() { return whistleFlashUntil; }
     public boolean       isTimerPaused()        { return timerPaused; }
     public long          getPausedRemainingMs() { return pausedRemainingMs; }
+    public String        getBallHolder()        { return ballHolder; }
 
     public boolean isReferee()
     {
@@ -1054,7 +1087,7 @@ public class GnomeballPlugin extends Plugin
         gameId = null; writeKey = null; joinCode = null; hostRsn = null;
         phase = GamePhase.DISCONNECTED; deadlineMs = 0; winner = null;
         teamAName = "Team A"; teamBName = "Team B"; teamAScore = 0; teamBScore = 0;
-        timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0;
+        timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0; ballHolder = null;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
     }
