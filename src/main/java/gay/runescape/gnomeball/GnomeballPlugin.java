@@ -16,14 +16,21 @@ import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.InventoryID;
+import net.runelite.api.Item;
+import net.runelite.api.ItemContainer;
 import net.runelite.api.Menu;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
+import net.runelite.api.PlayerComposition;
 import net.runelite.api.Tile;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuEntryAdded;
+import net.runelite.api.events.MenuOptionClicked;
+import net.runelite.api.kit.KitType;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -48,6 +55,7 @@ public class GnomeballPlugin extends Plugin
     private static final String KEY_PHASE     = "activePhase";
     private static final String KEY_DEADLINE  = "activeDeadlineMs";
 
+    private static final int    GNOMEBALL_ITEM_ID = 2528;
     private static final String COLOR_REFEREE = "3CB34A";
     private static final String COLOR_TEAM_A  = "3C78DC";
     private static final String COLOR_TEAM_B  = "C83C3C";
@@ -107,6 +115,9 @@ public class GnomeballPlugin extends Plugin
     private volatile String zoneTeam = null; // "TEAM_A" or "TEAM_B"
     private final Set<WorldPoint> zoneTiles = new HashSet<>();
     private volatile String ballHolder   = null;
+    private volatile long   interceptionFlashUntil = 0;
+    private volatile String interceptionPlayer     = null;
+    private volatile String interceptionTeam       = null;
     private volatile long goalFlashUntil = 0;
     private volatile String goalFlashTeam = null;
     private volatile int goalFlashOldScore = 0;
@@ -261,6 +272,89 @@ public class GnomeballPlugin extends Plugin
             .onClick(me -> handleEnlistClick(me, GnomeballRole.REFEREE));
     }
 
+    @Subscribe
+    public void onGameTick(GameTick event)
+    {
+        if (phase != GamePhase.ACTIVE || timerPaused || ballHolder == null) return;
+
+        String localRsn = localRsn();
+        if (localRsn == null || !ballHolder.equalsIgnoreCase(localRsn)) return;
+
+        GnomeballRole myRole = rosterReducer.getRole(localRsn);
+        if (myRole != GnomeballRole.TEAM_A && myRole != GnomeballRole.TEAM_B) return;
+
+        String zoneType = myRole == GnomeballRole.TEAM_A ? "ZONE_A" : "ZONE_B";
+        if (client.getLocalPlayer() == null) return;
+        WorldPoint pos = client.getLocalPlayer().getWorldLocation();
+        if (!tileReducer.hasMarker(pos, zoneType)) return;
+
+        onZoneScore(myRole == GnomeballRole.TEAM_A ? "TEAM_A" : "TEAM_B");
+    }
+
+    private void onZoneScore(String scoringTeam)
+    {
+        int oldScore = "TEAM_A".equals(scoringTeam) ? teamAScore : teamBScore;
+        int newScore = oldScore + 1;
+
+        // Optimistic local update — prevents re-triggering on subsequent ticks and shows flash immediately
+        goalFlashTeam     = scoringTeam;
+        goalFlashOldScore = oldScore;
+        goalFlashNewScore = newScore;
+        goalFlashUntil    = System.currentTimeMillis() + 3000;
+        if ("TEAM_A".equals(scoringTeam)) teamAScore = newScore;
+        else                              teamBScore = newScore;
+        ballHolder = null;
+        SwingUtilities.invokeLater(() -> panel.refresh());
+
+        final String gid = gameId;
+        final String rsn = localRsn();
+        if (gid == null || rsn == null) return;
+        executor.submit(() ->
+        {
+            try { apiClient.zoneGoal(gid, rsn); }
+            catch (Exception ex) { log.warn("Zone goal failed: {}", ex.getMessage()); }
+        });
+    }
+
+    @Subscribe
+    public void onMenuOptionClicked(MenuOptionClicked event)
+    {
+        if (phase != GamePhase.ACTIVE) return;
+        if (event.getMenuAction() != MenuAction.WIDGET_TARGET_ON_PLAYER) return;
+
+        String localRsn = localRsn();
+        if (localRsn == null) return;
+
+        // Must currently hold the ball
+        if (ballHolder == null || !ballHolder.equalsIgnoreCase(localRsn)) return;
+
+        // Must be an enlisted team player
+        GnomeballRole myRole = rosterReducer.getRole(localRsn);
+        if (myRole != GnomeballRole.TEAM_A && myRole != GnomeballRole.TEAM_B) return;
+
+        // Must be throwing a gnomeball
+        ItemContainer inv = client.getItemContainer(InventoryID.INVENTORY);
+        if (inv == null) return;
+        Item item = inv.getItem(event.getParam0());
+        if (item == null || item.getId() != GNOMEBALL_ITEM_ID) return;
+
+        // Target must have a free weapon slot
+        if (!(event.getMenuEntry().getActor() instanceof Player)) return;
+        Player target = (Player) event.getMenuEntry().getActor();
+        if (target == null || target.getName() == null) return;
+
+        PlayerComposition comp = target.getPlayerComposition();
+        if (comp == null) return;
+        int[] equipIds = comp.getEquipmentIds();
+        if (equipIds == null || equipIds[KitType.WEAPON.getIndex()] != 0) return;
+
+        String targetRsn = Text.toJagexName(target.getName());
+        if (targetRsn == null || targetRsn.isBlank()) return;
+
+        log.debug("Gnomeball pass: {} -> {}", localRsn, targetRsn);
+        onPassBallClicked(targetRsn);
+    }
+
     private void addZoneMenuEntries()
     {
         Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
@@ -305,16 +399,18 @@ public class GnomeballPlugin extends Plugin
         if (!isHost() || gameId == null || zoneTeam == null || zoneTiles.isEmpty()) return;
 
         String colorHex = "TEAM_A".equals(zoneTeam) ? "#3C78DC" : "#C83C3C";
+        String zoneType = "TEAM_A".equals(zoneTeam) ? "ZONE_A" : "ZONE_B";
         Set<WorldPoint> tiles = new HashSet<>(zoneTiles);
         cancelZoneMode();
 
         executor.submit(() ->
         {
-            try
+            // Boundary edges — per-tile try/catch so one failure doesn't abort the rest
+            for (WorldPoint wp : tiles)
             {
-                for (WorldPoint wp : tiles)
+                int x = wp.getX(), y = wp.getY(), plane = wp.getPlane();
+                try
                 {
-                    int x = wp.getX(), y = wp.getY(), plane = wp.getPlane();
                     if (!tiles.contains(new WorldPoint(x, y + 1, plane)))
                         apiClient.markTile(gameId, writeKey, x, y, plane, "BOUNDARY_N", colorHex);
                     if (!tiles.contains(new WorldPoint(x, y - 1, plane)))
@@ -324,8 +420,15 @@ public class GnomeballPlugin extends Plugin
                     if (!tiles.contains(new WorldPoint(x - 1, y, plane)))
                         apiClient.markTile(gameId, writeKey, x, y, plane, "BOUNDARY_W", colorHex);
                 }
+                catch (Exception ex) { log.warn("Zone boundary mark failed at {},{}: {}", x, y, ex.getMessage()); }
             }
-            catch (Exception ex) { log.warn("Commit zone failed: {}", ex.getMessage()); }
+
+            // Zone detection tiles — separate pass so any failure here never affects boundary rendering
+            for (WorldPoint wp : tiles)
+            {
+                try { apiClient.markTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), zoneType, null); }
+                catch (Exception ex) { log.warn("Zone detection mark failed at {},{}: {}", wp.getX(), wp.getY(), ex.getMessage()); }
+            }
         });
     }
 
@@ -608,7 +711,21 @@ public class GnomeballPlugin extends Plugin
             }
             case "BALL_ASSIGNED":
             {
-                ballHolder = safeStr(e.payload, "player");
+                String newHolder = safeStr(e.payload, "player");
+                if (newHolder != null && ballHolder != null)
+                {
+                    GnomeballRole prevRole = rosterReducer.getRole(ballHolder);
+                    GnomeballRole newRole  = rosterReducer.getRole(newHolder);
+                    boolean prevIsTeam = prevRole == GnomeballRole.TEAM_A || prevRole == GnomeballRole.TEAM_B;
+                    boolean newIsTeam  = newRole  == GnomeballRole.TEAM_A || newRole  == GnomeballRole.TEAM_B;
+                    if (prevIsTeam && newIsTeam && prevRole != newRole)
+                    {
+                        interceptionPlayer    = newHolder;
+                        interceptionTeam      = newRole == GnomeballRole.TEAM_A ? "TEAM_A" : "TEAM_B";
+                        interceptionFlashUntil = System.currentTimeMillis() + 3000;
+                    }
+                }
+                ballHolder = newHolder;
                 break;
             }
             case "BALL_CLEARED":
@@ -804,6 +921,18 @@ public class GnomeballPlugin extends Plugin
         });
     }
 
+    private void onPassBallClicked(String targetRsn)
+    {
+        final String gid = gameId;
+        final String rsn = localRsn();
+        if (gid == null || rsn == null) return;
+        executor.submit(() ->
+        {
+            try { apiClient.passBall(gid, rsn, targetRsn); }
+            catch (Exception ex) { log.warn("Pass ball failed: {}", ex.getMessage()); }
+        });
+    }
+
     public void onClearBallClicked()
     {
         if (!isHost() || gameId == null) return;
@@ -889,7 +1018,10 @@ public class GnomeballPlugin extends Plugin
     public long          getWhistleFlashUntil() { return whistleFlashUntil; }
     public boolean       isTimerPaused()        { return timerPaused; }
     public long          getPausedRemainingMs() { return pausedRemainingMs; }
-    public String        getBallHolder()        { return ballHolder; }
+    public String        getBallHolder()              { return ballHolder; }
+    public long          getInterceptionFlashUntil() { return interceptionFlashUntil; }
+    public String        getInterceptionPlayer()     { return interceptionPlayer; }
+    public String        getInterceptionTeam()       { return interceptionTeam; }
 
     public boolean isReferee()
     {
@@ -1088,6 +1220,7 @@ public class GnomeballPlugin extends Plugin
         phase = GamePhase.DISCONNECTED; deadlineMs = 0; winner = null;
         teamAName = "Team A"; teamBName = "Team B"; teamAScore = 0; teamBScore = 0;
         timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0; ballHolder = null;
+        interceptionFlashUntil = 0; interceptionPlayer = null; interceptionTeam = null;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
     }

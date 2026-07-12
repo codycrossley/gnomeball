@@ -109,6 +109,7 @@ public class TimerOverlay extends Overlay
 
         renderGoalFlash(g);
         renderWhistleFlash(g);
+        renderInterceptionFlash(g);
 
         return new Dimension(boxW, boxH);
     }
@@ -207,6 +208,51 @@ public class TimerOverlay extends Overlay
         g.drawString(whistleText, textX + 2, textY + 2);
         g.setColor(whistleColor);
         g.drawString(whistleText, textX, textY);
+    }
+
+    private void renderInterceptionFlash(Graphics2D g)
+    {
+        long flashUntil = plugin.getInterceptionFlashUntil();
+        long remaining = flashUntil - System.currentTimeMillis();
+        if (remaining <= 0) return;
+
+        String interceptingTeam = plugin.getInterceptionTeam();
+        String interceptingPlayer = plugin.getInterceptionPlayer();
+        if (interceptingTeam == null || interceptingPlayer == null) return;
+
+        boolean isTeamA = "TEAM_A".equals(interceptingTeam);
+        Color teamColor = isTeamA ? COLOR_TEAM_A : COLOR_TEAM_B;
+
+        float alpha = Math.min(1f, remaining / 500f);
+        Color flashColor = withAlpha(teamColor, alpha);
+        Color shadowColor = new Color(0, 0, 0, (int) (180 * alpha));
+        Color nameColor = withAlpha(COLOR_PLENTY, alpha);
+
+        int canvasW = client.getCanvasWidth();
+        int canvasH = client.getCanvasHeight();
+
+        g.setFont(goalFont);
+        FontMetrics goalFm = g.getFontMetrics();
+        String headerText = "INTERCEPTED!";
+        int headerW = goalFm.stringWidth(headerText);
+        int headerX = (canvasW - headerW) / 2;
+        int headerY = canvasH / 3;
+
+        g.setColor(shadowColor);
+        g.drawString(headerText, headerX + 2, headerY + 2);
+        g.setColor(flashColor);
+        g.drawString(headerText, headerX, headerY);
+
+        g.setFont(goalScoreFont);
+        FontMetrics nameFm = g.getFontMetrics();
+        int nameW = nameFm.stringWidth(interceptingPlayer);
+        int nameX = (canvasW - nameW) / 2;
+        int nameY = headerY + goalFm.getHeight() + 8;
+
+        g.setColor(shadowColor);
+        g.drawString(interceptingPlayer, nameX + 2, nameY + 2);
+        g.setColor(nameColor);
+        g.drawString(interceptingPlayer, nameX, nameY);
     }
 
     private static Color withAlpha(Color c, float alpha)

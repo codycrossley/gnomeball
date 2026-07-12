@@ -96,6 +96,31 @@ public class ApiClient
         }
     }
 
+    public void passBall(String gameId, String fromRsn, String toRsn) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", fromRsn);
+        body.addProperty("target", toRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/pass-ball", body, null))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Pass ball failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    public void zoneGoal(String gameId, String playerRsn) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/zone-goal", body, null))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Zone goal failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     public void clearBall(String gameId, String writeKey) throws IOException
     {
         try (Response resp = post("/v1/games/" + gameId + "/clear-ball", new JsonObject(), writeKey))
