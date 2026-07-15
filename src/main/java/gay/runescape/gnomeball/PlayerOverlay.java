@@ -14,6 +14,8 @@ public class PlayerOverlay extends Overlay
     private static final Color COLOR_BALL    = new Color(255, 210, 0);
     private static final Color COLOR_TEAM_A  = new Color(17, 104, 253);
     private static final Color COLOR_TEAM_B  = new Color(200, 60, 60);
+    private static final Color COLOR_TAG_ARROW = new Color(255, 60, 60);
+    private static final long  TAG_ARROW_PERIOD_MS = 800;
 
     private final Client client;
     private final GnomeballConfig config;
@@ -67,14 +69,21 @@ public class PlayerOverlay extends Overlay
             String bh = plugin.getBallHolder();
             boolean hasBall = bh != null && bh.equalsIgnoreCase(rsn);
 
+            int cx = loc.getX() + textWidth / 2;
+            int topY = loc.getY() - textHeight - 6;
+
             if (hasBall)
             {
-                int cx = loc.getX() + textWidth / 2;
-                int cy = loc.getY() - textHeight - 6;
                 g.setColor(Color.BLACK);
-                g.fillOval(cx - 6, cy - 6, 12, 12);
+                g.fillOval(cx - 6, topY - 6, 12, 12);
                 g.setColor(COLOR_BALL);
-                g.fillOval(cx - 5, cy - 5, 10, 10);
+                g.fillOval(cx - 5, topY - 5, 10, 10);
+            }
+
+            String owedTo = plugin.getTagObligationTagger();
+            if (owedTo != null && owedTo.equalsIgnoreCase(rsn))
+            {
+                drawTagArrow(g, cx, hasBall ? topY - 16 : topY);
             }
 
             g.setColor(Color.BLACK);
@@ -84,6 +93,24 @@ public class PlayerOverlay extends Overlay
         }
 
         return null;
+    }
+
+    /** Draws a flashing, bobbing downward-pointing arrow centered at {@code cx}, tip resting at {@code tipY}. */
+    private static void drawTagArrow(Graphics2D g, int cx, int tipY)
+    {
+        double phase = (System.currentTimeMillis() % TAG_ARROW_PERIOD_MS) / (double) TAG_ARROW_PERIOD_MS;
+        float alpha = (float) (0.4 + 0.6 * Math.abs(Math.sin(phase * Math.PI)));
+        int bob = (int) Math.round(4 * Math.sin(phase * Math.PI * 2));
+
+        int tip = tipY - 14 + bob;
+        int[] xs = { cx - 6, cx + 6, cx };
+        int[] ys = { tip - 8, tip - 8, tip };
+
+        g.setColor(new Color(0, 0, 0, (int) (180 * alpha)));
+        g.fillPolygon(new int[] { xs[0] + 1, xs[1] + 1, xs[2] + 1 }, new int[] { ys[0] + 1, ys[1] + 1, ys[2] + 1 }, 3);
+
+        g.setColor(new Color(COLOR_TAG_ARROW.getRed(), COLOR_TAG_ARROW.getGreen(), COLOR_TAG_ARROW.getBlue(), (int) (255 * alpha)));
+        g.fillPolygon(xs, ys, 3);
     }
 
     private static Color roleColor(GnomeballRole role)
