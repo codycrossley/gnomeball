@@ -13,6 +13,7 @@ public class TimerOverlay extends Overlay
     private static final Color COLOR_TEAM_A   = new Color(17, 104, 253, 220);
     private static final Color COLOR_TEAM_B   = new Color(200, 60, 60, 220);
     private static final Color COLOR_REFEREE  = new Color(60, 179, 74, 220);
+    private static final Color COLOR_BALL     = new Color(255, 210, 0, 220);
     private static final Color BG_COLOR       = new Color(0, 0, 0, 140);
     private static final int   WARN_SECS     = 30;
     private static final int   DANGER_SECS   = 10;
@@ -21,7 +22,7 @@ public class TimerOverlay extends Overlay
     private final GnomeballPlugin plugin;
 
     private final Font timerFont = FontManager.getRunescapeBoldFont().deriveFont(18f);
-    private final Font scoreFont = FontManager.getRunescapeBoldFont().deriveFont(14f);
+    private final Font scoreFont = FontManager.getRunescapeBoldFont().deriveFont(20f);
     private final Font goalFont  = FontManager.getRunescapeBoldFont().deriveFont(48f);
 
     public TimerOverlay(Client client, GnomeballPlugin plugin)
@@ -85,8 +86,10 @@ public class TimerOverlay extends Overlay
         int scoreLineW = scoreAW + dashW + scoreBW;
         int scoreH = scoreFm.getAscent();
 
+        int ballIndicatorSpace = 16;
+
         int boxW = Math.max(timerW, scoreLineW) + pad * 2;
-        int boxH = timerH + scoreH + pad * 3;
+        int boxH = timerH + scoreH + pad * 3 + ballIndicatorSpace;
 
         g.setColor(BG_COLOR);
         g.fillRoundRect(0, 0, boxW, boxH, 6, 6);
@@ -107,11 +110,31 @@ public class TimerOverlay extends Overlay
         g.setColor(COLOR_TEAM_B);
         g.drawString(scoreB, scoreStartX + scoreAW + dashW, scoreY);
 
+        renderPossessionIndicator(g, scoreStartX, scoreAW, dashW, scoreBW, scoreY, ballIndicatorSpace);
+
         renderGoalFlash(g);
         renderWhistleFlash(g);
         renderInterceptionFlash(g);
 
         return new Dimension(boxW, boxH);
+    }
+
+    private void renderPossessionIndicator(Graphics2D g, int scoreStartX, int scoreAW, int dashW, int scoreBW, int scoreY, int ballIndicatorSpace)
+    {
+        String holder = plugin.getBallHolder();
+        if (holder == null) return;
+
+        GnomeballRole holderRole = plugin.getRoster().getRole(holder);
+        if (holderRole != GnomeballRole.TEAM_A && holderRole != GnomeballRole.TEAM_B) return;
+
+        boolean isTeamA = holderRole == GnomeballRole.TEAM_A;
+        int cx = isTeamA ? scoreStartX + scoreAW / 2 : scoreStartX + scoreAW + dashW + scoreBW / 2;
+        int cy = scoreY + ballIndicatorSpace / 2 + 2;
+
+        g.setColor(Color.BLACK);
+        g.fillOval(cx - 6, cy - 6, 12, 12);
+        g.setColor(COLOR_BALL);
+        g.fillOval(cx - 5, cy - 5, 10, 10);
     }
 
     private static final Font goalScoreFont = FontManager.getRunescapeBoldFont().deriveFont(28f);

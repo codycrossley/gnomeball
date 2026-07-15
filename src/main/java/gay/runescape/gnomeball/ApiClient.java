@@ -109,6 +109,19 @@ public class ApiClient
         }
     }
 
+    public void tagPlayer(String gameId, String taggerRsn, String targetRsn) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", taggerRsn);
+        body.addProperty("target", targetRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/tag-player", body, null))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Tag player failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     public void zoneGoal(String gameId, String playerRsn) throws IOException
     {
         JsonObject body = new JsonObject();

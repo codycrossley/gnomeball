@@ -3,7 +3,10 @@ package gay.runescape.gnomeball;
 import com.google.gson.Gson;
 import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -14,6 +17,8 @@ import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.Actor;
+import net.runelite.api.AnimationController;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.InventoryID;
@@ -22,10 +27,14 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.Menu;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
+import net.runelite.api.Model;
 import net.runelite.api.Player;
 import net.runelite.api.PlayerComposition;
+import net.runelite.api.RuneLiteObject;
 import net.runelite.api.Tile;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuEntryAdded;
@@ -59,6 +68,12 @@ public class GnomeballPlugin extends Plugin
     private static final String COLOR_REFEREE = "3CB34A";
     private static final String COLOR_TEAM_A  = "3C78DC";
     private static final String COLOR_TEAM_B  = "C83C3C";
+
+    // Tag effect — copied from the Landmines detonation spotanim in the Skwid Games plugin
+    private static final int    TAG_MODEL_ID  = 3960;
+    private static final int    TAG_ANIM_ID   = 1230;
+    private static final int    ITEM_RUBBER_CHICKEN = 4566;
+    private static final int    ITEM_STALE_BAGUETTE = 20590;
 
     @Inject private Client client;
     @Inject private ClientThread clientThread;
@@ -114,6 +129,8 @@ public class GnomeballPlugin extends Plugin
     private volatile int gridHeight = 5;
     private volatile String zoneTeam = null; // "TEAM_A" or "TEAM_B"
     private final Set<WorldPoint> zoneTiles = new HashSet<>();
+    private final List<RuneLiteObject> activeTagEffects = new ArrayList<>();
+    private volatile WorldPoint lastSelfPosition = null;
     private volatile String ballHolder   = null;
     private volatile long   interceptionFlashUntil = 0;
     private volatile String interceptionPlayer     = null;
@@ -275,6 +292,10 @@ public class GnomeballPlugin extends Plugin
     @Subscribe
     public void onGameTick(GameTick event)
     {
+        // Snapshot our own position once per tick so a same-tick attack can still be matched
+        // against where we were a moment ago, even if we've since stepped away.
+        lastSelfPosition = client.getLocalPlayer() != null ? client.getLocalPlayer().getWorldLocation() : null;
+
         if (phase != GamePhase.ACTIVE || timerPaused || ballHolder == null) return;
 
         String localRsn = localRsn();
@@ -353,6 +374,72 @@ public class GnomeballPlugin extends Plugin
 
         log.debug("Gnomeball pass: {} -> {}", localRsn, targetRsn);
         onPassBallClicked(targetRsn);
+    }
+
+    @Subscribe
+    public void onAnimationChanged(AnimationChanged event)
+    {
+        if (phase != GamePhase.ACTIVE) return;
+
+        Actor actor = event.getActor();
+        if (!(actor instanceof Player)) return;
+        if (actor.getAnimation() == -1) return;
+
+        Player attacker = (Player) actor;
+        if (attacker.getName() == null) return;
+        String attackerRsn = Text.toJagexName(attacker.getName());
+        if (attackerRsn == null || attackerRsn.isBlank()) return;
+
+        String selfRsn = localRsn();
+        if (selfRsn == null) return;
+
+        // Only the current ball holder can be tagged
+        if (ballHolder == null || !ballHolder.equalsIgnoreCase(selfRsn)) return;
+
+        // The attacker must actually be targeting the local (ball-holding) player.
+        // getInteracting() can lag a tick behind the animation when the attacker had to walk
+        // into range first, so also accept melee-adjacency as proof they're swinging at us.
+        // Adjacency is checked against both our current position and our position as of the
+        // last tick, since we may have already stepped away by the time the animation lands.
+        Player localPlayer = client.getLocalPlayer();
+        WorldPoint attackerPos = attacker.getWorldLocation();
+        boolean targetingMe = localPlayer != null && attacker.getInteracting() == localPlayer;
+        boolean adjacentNow = localPlayer != null
+            && attackerPos != null
+            && localPlayer.getWorldLocation() != null
+            && attackerPos.distanceTo(localPlayer.getWorldLocation()) <= 1;
+        boolean adjacentLastTick = attackerPos != null
+            && lastSelfPosition != null
+            && attackerPos.distanceTo(lastSelfPosition) <= 1;
+        if (!targetingMe && !adjacentNow && !adjacentLastTick) return;
+
+        GnomeballRole attackerRole = rosterReducer.getRole(attackerRsn);
+        GnomeballRole selfRole = rosterReducer.getRole(selfRsn);
+        boolean attackerIsTeam = attackerRole == GnomeballRole.TEAM_A || attackerRole == GnomeballRole.TEAM_B;
+        boolean selfIsTeam = selfRole == GnomeballRole.TEAM_A || selfRole == GnomeballRole.TEAM_B;
+        if (!attackerIsTeam || !selfIsTeam || attackerRole == selfRole) return;
+
+        // Must be wielding a whackable weapon (Rubber chicken / Stale baguette)
+        PlayerComposition comp = attacker.getPlayerComposition();
+        if (comp == null) return;
+        int[] equipIds = comp.getEquipmentIds();
+        if (equipIds == null) return;
+        int weaponSlotId = equipIds[KitType.WEAPON.getIndex()];
+        if (weaponSlotId < PlayerComposition.ITEM_OFFSET) return;
+        int weaponId = weaponSlotId - PlayerComposition.ITEM_OFFSET;
+        if (weaponId != ITEM_RUBBER_CHICKEN && weaponId != ITEM_STALE_BAGUETTE) return;
+
+        final String gid = gameId;
+        if (gid == null) return;
+        final String self = selfRsn;
+        final String tagger = attackerRsn;
+
+        log.debug("Whack tag: {} -> {} (anim={}, weapon={})", tagger, self, actor.getAnimation(), weaponId);
+        executor.submit(() ->
+        {
+            try { apiClient.tagPlayer(gid, tagger, self); }
+            catch (Exception ex) { log.debug("Tag report failed: {}", ex.getMessage()); }
+        });
     }
 
     private void addZoneMenuEntries()
@@ -712,7 +799,8 @@ public class GnomeballPlugin extends Plugin
             case "BALL_ASSIGNED":
             {
                 String newHolder = safeStr(e.payload, "player");
-                if (newHolder != null && ballHolder != null)
+                boolean manualAssign = safeBool(e.payload, "manual");
+                if (newHolder != null && ballHolder != null && !manualAssign)
                 {
                     GnomeballRole prevRole = rosterReducer.getRole(ballHolder);
                     GnomeballRole newRole  = rosterReducer.getRole(newHolder);
@@ -733,6 +821,16 @@ public class GnomeballPlugin extends Plugin
                 ballHolder = null;
                 break;
             }
+            case "PLAYER_TAGGED":
+            {
+                String target = safeStr(e.payload, "target");
+                if (target != null)
+                {
+                    final String targetRsn = target;
+                    clientThread.invokeLater(() -> spawnTagEffect(targetRsn));
+                }
+                break;
+            }
             case "PLAYER_JOINED":
             case "ROLE_ASSIGNED":
             case "PLAYER_LEFT":
@@ -741,6 +839,57 @@ public class GnomeballPlugin extends Plugin
         }
 
         SwingUtilities.invokeLater(() -> panel.refresh());
+    }
+
+    // -------------------------------------------------------------------------
+    // Tag effect — copied from the Landmines detonation spotanim (Skwid Games plugin)
+    // -------------------------------------------------------------------------
+
+    /** Spawns the tag effect on a named player at their current location. Must be called on the client thread. */
+    private void spawnTagEffect(String rsn)
+    {
+        for (Player p : client.getPlayers())
+        {
+            if (p == null || p.getName() == null) continue;
+            if (!rsn.equalsIgnoreCase(Text.toJagexName(p.getName()))) continue;
+            WorldPoint wp = p.getWorldLocation();
+            if (wp == null) return;
+            spawnTagEffectAt(wp);
+            return;
+        }
+    }
+
+    /** Spawns a world-space tag effect at {@code wp}. Must be called on the client thread. */
+    private void spawnTagEffectAt(WorldPoint wp)
+    {
+        Model model = client.loadModel(TAG_MODEL_ID);
+        if (model == null) return;
+
+        Collection<WorldPoint> locals = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), wp);
+        for (WorldPoint local : locals)
+        {
+            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
+            if (lp == null) continue;
+
+            RuneLiteObject obj = client.createRuneLiteObject();
+            obj.setModel(model);
+            AnimationController ac = new AnimationController(client, TAG_ANIM_ID);
+            ac.setOnFinished(_ac -> obj.setActive(false));
+            obj.setAnimationController(ac);
+            obj.setLocation(lp, wp.getPlane());
+            obj.setActive(true);
+            activeTagEffects.add(obj);
+        }
+    }
+
+    /** Deactivates all active tag effect objects. Must be called on the client thread. */
+    private void clearActiveTagEffects()
+    {
+        for (RuneLiteObject obj : activeTagEffects)
+        {
+            if (obj.isActive()) obj.setActive(false);
+        }
+        activeTagEffects.clear();
     }
 
     private void refreshRosterNow()
@@ -1223,6 +1372,7 @@ public class GnomeballPlugin extends Plugin
         interceptionFlashUntil = 0; interceptionPlayer = null; interceptionTeam = null;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
+        clientThread.invokeLater(this::clearActiveTagEffects);
     }
 
     private void loadTiles()
@@ -1252,6 +1402,12 @@ public class GnomeballPlugin extends Plugin
     {
         try { return (o != null && o.has(key) && !o.get(key).isJsonNull()) ? o.get(key).getAsLong() : 0; }
         catch (Exception ignored) { return 0; }
+    }
+
+    private static boolean safeBool(com.google.gson.JsonObject o, String key)
+    {
+        try { return o != null && o.has(key) && !o.get(key).isJsonNull() && o.get(key).getAsBoolean(); }
+        catch (Exception ignored) { return false; }
     }
 
     private static long parseEpochMs(String iso)
