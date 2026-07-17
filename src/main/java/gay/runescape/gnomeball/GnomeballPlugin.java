@@ -42,6 +42,7 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
 import okhttp3.OkHttpClient;
@@ -76,6 +77,7 @@ public class GnomeballPlugin extends Plugin
     @Inject private GnomeballConfig config;
     @Inject private ClientToolbar clientToolbar;
     @Inject private OverlayManager overlayManager;
+    @Inject private ModelOutlineRenderer modelOutlineRenderer;
     @Inject private OkHttpClient okHttpClient;
     @Inject private Gson gson;
 
@@ -164,7 +166,7 @@ public class GnomeballPlugin extends Plugin
             .build();
         clientToolbar.addNavigation(navButton);
 
-        playerOverlay = new PlayerOverlay(client, config, this, rosterReducer);
+        playerOverlay = new PlayerOverlay(client, config, this, rosterReducer, modelOutlineRenderer);
         timerOverlay = new TimerOverlay(client, this);
         tileOverlay = new TileOverlay(client, config, this, tileReducer);
         overlayManager.add(playerOverlay);

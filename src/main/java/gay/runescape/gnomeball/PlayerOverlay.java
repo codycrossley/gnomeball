@@ -6,6 +6,7 @@ import net.runelite.api.Player;
 import net.runelite.api.Point;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.overlay.*;
+import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
 import net.runelite.client.util.Text;
 
 public class PlayerOverlay extends Overlay
@@ -16,18 +17,25 @@ public class PlayerOverlay extends Overlay
     private static final Color COLOR_TEAM_B  = new Color(200, 60, 60);
     private static final Color COLOR_TAG_ARROW = new Color(255, 60, 60);
     private static final long  TAG_ARROW_PERIOD_MS = 800;
+    private static final Color COLOR_TEAM_A_OUTLINE  = new Color(17, 104, 253, 180);
+    private static final Color COLOR_TEAM_B_OUTLINE  = new Color(200, 60, 60, 180);
+    private static final Color COLOR_REFEREE_OUTLINE = new Color(60, 179, 74, 180);
+    private static final int   FIELD_OUTLINE_WIDTH = 2;
+    private static final int   FIELD_OUTLINE_FEATHER = 2;
 
     private final Client client;
     private final GnomeballConfig config;
     private final GnomeballPlugin plugin;
     private final RosterReducer roster;
+    private final ModelOutlineRenderer modelOutlineRenderer;
 
-    public PlayerOverlay(Client client, GnomeballConfig config, GnomeballPlugin plugin, RosterReducer roster)
+    public PlayerOverlay(Client client, GnomeballConfig config, GnomeballPlugin plugin, RosterReducer roster, ModelOutlineRenderer modelOutlineRenderer)
     {
         this.client = client;
         this.config = config;
         this.plugin = plugin;
         this.roster = roster;
+        this.modelOutlineRenderer = modelOutlineRenderer;
 
         setPosition(OverlayPosition.DYNAMIC);
         setLayer(OverlayLayer.ABOVE_SCENE);
@@ -52,6 +60,24 @@ public class PlayerOverlay extends Overlay
 
             GnomeballRole role = roster.getRole(rsn);
             if (role == null) continue;
+
+            // Team players and referees get outlined in their own role color while standing on
+            // the field. Observers are left unaltered.
+            if (role != GnomeballRole.OBSERVER && plugin.getTileReducer().isWithinField(p.getWorldLocation()))
+            {
+                Color outlineColor;
+                switch (role)
+                {
+                    case TEAM_A:  outlineColor = COLOR_TEAM_A_OUTLINE; break;
+                    case TEAM_B:  outlineColor = COLOR_TEAM_B_OUTLINE; break;
+                    case REFEREE: outlineColor = COLOR_REFEREE_OUTLINE; break;
+                    default:      outlineColor = null;
+                }
+                if (outlineColor != null)
+                {
+                    modelOutlineRenderer.drawOutline(p, FIELD_OUTLINE_WIDTH, outlineColor, FIELD_OUTLINE_FEATHER);
+                }
+            }
 
             String number = roster.getNumber(rsn);
             if (number == null || number.isEmpty()) continue;
