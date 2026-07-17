@@ -67,7 +67,9 @@ public class PlayerOverlay extends Overlay
             Color color = roleColor(role);
 
             String bh = plugin.getBallHolder();
-            boolean hasBall = bh != null && bh.equalsIgnoreCase(rsn);
+            // Referees technically pass through possession (e.g. receiving it back after a goal),
+            // but they never "have" the ball in the gameplay sense, so never show the icon for them.
+            boolean hasBall = bh != null && bh.equalsIgnoreCase(rsn) && role != GnomeballRole.REFEREE;
 
             int cx = loc.getX() + textWidth / 2;
             int topY = loc.getY() - textHeight - 6;
@@ -81,7 +83,9 @@ public class PlayerOverlay extends Overlay
             }
 
             String owedTo = plugin.getTagObligationTagger();
-            if (owedTo != null && owedTo.equalsIgnoreCase(rsn))
+            boolean owedTag = owedTo != null && owedTo.equalsIgnoreCase(rsn);
+            boolean owedGoal = plugin.isGoalObligationActive() && role == GnomeballRole.REFEREE;
+            if (owedTag || owedGoal)
             {
                 drawTagArrow(g, cx, hasBall ? topY - 16 : topY);
             }

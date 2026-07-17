@@ -194,6 +194,18 @@ public class ApiClient
         }
     }
 
+    public void broadcastMessage(String gameId, String writeKey, String message) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("message", message);
+
+        try (Response resp = post("/v1/games/" + gameId + "/broadcast", body, writeKey))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Broadcast message failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     public void markTile(String gameId, String writeKey, int x, int y, int plane, String tileType, String color) throws IOException
     {
         JsonObject body = new JsonObject();

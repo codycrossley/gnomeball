@@ -47,7 +47,10 @@ public class GnomeballPanel extends PluginPanel
     private final JPanel hostScoreBPanel = new JPanel();
     private final JPanel rosterTablePanel   = new JPanel();
 
-    // Grid placement (host)
+    // Host controls (grouping card — visible to host only, LOBBY or ACTIVE)
+    private final JPanel hostControlsCard = new JPanel();
+
+    // Grid placement (host; shown whenever the host card is shown)
     private final JPanel gridPanel = new JPanel();
     private final JSpinner gridWidthSpinner  = new JSpinner(new SpinnerNumberModel(5, 1, 50, 1));
     private final JSpinner gridHeightSpinner = new JSpinner(new SpinnerNumberModel(5, 1, 50, 1));
@@ -56,13 +59,17 @@ public class GnomeballPanel extends PluginPanel
     private final JButton zoneABtn = new JButton("Team A Zone");
     private final JButton zoneBBtn = new JButton("Team B Zone");
 
-    // Host pre-start (LOBBY only)
+    // Host pre-start (LOBBY only, within host card)
     private final JPanel hostPreStartPanel = new JPanel();
     private final JSpinner durationSpinner = new JSpinner(new SpinnerNumberModel(10, 1, 120, 1));
     private final JButton startGameBtn     = new JButton("Start Game");
 
-    // Host in-game (ACTIVE only)
+    // Host in-game controls (ACTIVE only, within host card)
+    private final JPanel hostInGamePanel = new JPanel();
     private final JButton endGameBtn   = new JButton("End Game");
+    private final JPanel  hostMessagePanel = new JPanel();
+    private final JTextField hostMessageField = new JTextField();
+    private final JButton sendMessageBtn = new JButton("Send Message");
 
     // Referee controls (ACTIVE, referee role)
     private final JPanel  refereePanel    = new JPanel();
@@ -76,7 +83,10 @@ public class GnomeballPanel extends PluginPanel
 
     public GnomeballPanel(GnomeballPlugin plugin)
     {
-        super(false);
+        // wrap=true: let PluginPanel wrap this panel in its own vertical JScrollPane, so the
+        // whole panel scrolls once content (e.g. a large roster) exceeds the visible sidebar height.
+        super(true);
+        setBorder(BorderFactory.createEmptyBorder());
         this.plugin = plugin;
         setLayout(new BorderLayout());
         setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -288,31 +298,42 @@ public class GnomeballPanel extends PluginPanel
         card.add(rosterTitle);
         card.add(Box.createVerticalStrut(4));
 
-        // Roster table
+        // Roster table — no internal scroll region; the whole panel scrolls (see constructor),
+        // so a growing roster just pushes the panel's overall scroll extent, not its own nested one.
         rosterTablePanel.setLayout(new BoxLayout(rosterTablePanel, BoxLayout.Y_AXIS));
         rosterTablePanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        JScrollPane scroll = new JScrollPane(rosterTablePanel,
-            ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-            ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        scroll.setAlignmentX(LEFT_ALIGNMENT);
-        scroll.setBackground(ColorScheme.DARK_GRAY_COLOR);
-        scroll.setBorder(BorderFactory.createEmptyBorder());
-        card.add(scroll);
+        rosterTablePanel.setAlignmentX(LEFT_ALIGNMENT);
+        card.add(rosterTablePanel);
         card.add(Box.createVerticalStrut(12));
 
-        // Grid placement (host)
-        JLabel gridTitle = new JLabel("FIELD");
+        // ===== HOST CONTROLS card (host only; groups Field, Setup, In-Game) =====
+        hostControlsCard.setLayout(new BoxLayout(hostControlsCard, BoxLayout.Y_AXIS));
+        hostControlsCard.setBackground(new Color(34, 30, 26));
+        hostControlsCard.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(90, 70, 40), 1),
+            new EmptyBorder(8, 8, 8, 8)));
+        hostControlsCard.setAlignmentX(LEFT_ALIGNMENT);
+        hostControlsCard.setVisible(false);
+
+        JLabel hostCardTitle = new JLabel("HOST CONTROLS");
+        hostCardTitle.setForeground(ColorScheme.BRAND_ORANGE);
+        hostCardTitle.setFont(FontManager.getRunescapeSmallFont());
+        hostCardTitle.setAlignmentX(LEFT_ALIGNMENT);
+        hostControlsCard.add(hostCardTitle);
+        hostControlsCard.add(Box.createVerticalStrut(6));
+
+        // Field (grid/zone placement) — shown whenever the host card is shown
+        JLabel gridTitle = new JLabel("Field");
         gridTitle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         gridTitle.setFont(FontManager.getRunescapeSmallFont());
         gridTitle.setAlignmentX(LEFT_ALIGNMENT);
 
         gridPanel.setLayout(new BoxLayout(gridPanel, BoxLayout.Y_AXIS));
-        gridPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        gridPanel.setBackground(new Color(34, 30, 26));
         gridPanel.setAlignmentX(LEFT_ALIGNMENT);
-        gridPanel.setVisible(false);
 
         JPanel gridSizeRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        gridSizeRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        gridSizeRow.setBackground(new Color(34, 30, 26));
         gridSizeRow.setAlignmentX(LEFT_ALIGNMENT);
         JLabel wLabel = new JLabel("W:");
         wLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
@@ -329,7 +350,7 @@ public class GnomeballPanel extends PluginPanel
         gridPanel.add(Box.createVerticalStrut(4));
 
         JPanel gridBtnRow = new JPanel(new GridLayout(1, 2, 4, 0));
-        gridBtnRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        gridBtnRow.setBackground(new Color(34, 30, 26));
         gridBtnRow.setAlignmentX(LEFT_ALIGNMENT);
         gridBtnRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 
@@ -366,7 +387,7 @@ public class GnomeballPanel extends PluginPanel
         gridPanel.add(Box.createVerticalStrut(4));
 
         JPanel zoneBtnRow = new JPanel(new GridLayout(1, 2, 4, 0));
-        zoneBtnRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        zoneBtnRow.setBackground(new Color(34, 30, 26));
         zoneBtnRow.setAlignmentX(LEFT_ALIGNMENT);
         zoneBtnRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 
@@ -394,19 +415,19 @@ public class GnomeballPanel extends PluginPanel
         zoneBtnRow.add(zoneBBtn);
         gridPanel.add(zoneBtnRow);
 
-        card.add(gridTitle);
-        card.add(Box.createVerticalStrut(4));
-        card.add(gridPanel);
-        card.add(Box.createVerticalStrut(8));
+        hostControlsCard.add(gridTitle);
+        hostControlsCard.add(Box.createVerticalStrut(4));
+        hostControlsCard.add(gridPanel);
+        hostControlsCard.add(Box.createVerticalStrut(8));
 
-        // Host pre-start controls
+        // Setup sub-group (LOBBY only): duration + start
         hostPreStartPanel.setLayout(new BoxLayout(hostPreStartPanel, BoxLayout.Y_AXIS));
-        hostPreStartPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        hostPreStartPanel.setBackground(new Color(34, 30, 26));
         hostPreStartPanel.setAlignmentX(LEFT_ALIGNMENT);
         hostPreStartPanel.setVisible(false);
 
         JPanel durationRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        durationRow.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        durationRow.setBackground(new Color(34, 30, 26));
         durationRow.setAlignmentX(LEFT_ALIGNMENT);
         JLabel durLabel = new JLabel("Duration (min): ");
         durLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
@@ -420,24 +441,65 @@ public class GnomeballPanel extends PluginPanel
         startGameBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         startGameBtn.addActionListener(e -> plugin.onStartClicked((Integer) durationSpinner.getValue() * 60));
         hostPreStartPanel.add(startGameBtn);
-        card.add(hostPreStartPanel);
-        card.add(Box.createVerticalStrut(4));
+        hostControlsCard.add(hostPreStartPanel);
 
-        // End game (ACTIVE, host)
+        // In-game sub-group (ACTIVE only): end game + broadcast message
+        hostInGamePanel.setLayout(new BoxLayout(hostInGamePanel, BoxLayout.Y_AXIS));
+        hostInGamePanel.setBackground(new Color(34, 30, 26));
+        hostInGamePanel.setAlignmentX(LEFT_ALIGNMENT);
+        hostInGamePanel.setVisible(false);
+
         endGameBtn.setAlignmentX(LEFT_ALIGNMENT);
         endGameBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         endGameBtn.setForeground(new Color(220, 60, 60));
-        endGameBtn.setVisible(false);
         endGameBtn.addActionListener(e -> plugin.onEndClicked());
-        card.add(endGameBtn);
+        hostInGamePanel.add(endGameBtn);
+        hostInGamePanel.add(Box.createVerticalStrut(8));
 
-        // Referee controls (ACTIVE, referee role)
+        JLabel messageTitle = new JLabel("Broadcast Message");
+        messageTitle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        messageTitle.setFont(FontManager.getRunescapeSmallFont());
+        messageTitle.setAlignmentX(LEFT_ALIGNMENT);
+
+        hostMessagePanel.setLayout(new BoxLayout(hostMessagePanel, BoxLayout.Y_AXIS));
+        hostMessagePanel.setBackground(new Color(34, 30, 26));
+        hostMessagePanel.setAlignmentX(LEFT_ALIGNMENT);
+
+        hostMessageField.setAlignmentX(LEFT_ALIGNMENT);
+        hostMessageField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        Runnable sendMessage = () ->
+        {
+            plugin.onBroadcastMessageClicked(hostMessageField.getText());
+            hostMessageField.setText("");
+        };
+        hostMessageField.addActionListener(e -> sendMessage.run());
+
+        sendMessageBtn.setAlignmentX(LEFT_ALIGNMENT);
+        sendMessageBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        sendMessageBtn.addActionListener(e -> sendMessage.run());
+
+        hostMessagePanel.add(hostMessageField);
+        hostMessagePanel.add(Box.createVerticalStrut(4));
+        hostMessagePanel.add(sendMessageBtn);
+
+        hostInGamePanel.add(messageTitle);
+        hostInGamePanel.add(Box.createVerticalStrut(4));
+        hostInGamePanel.add(hostMessagePanel);
+        hostControlsCard.add(hostInGamePanel);
+
+        card.add(hostControlsCard);
+        card.add(Box.createVerticalStrut(8));
+
+        // ===== REFEREE CONTROLS card (referee role only, ACTIVE) =====
         refereePanel.setLayout(new BoxLayout(refereePanel, BoxLayout.Y_AXIS));
-        refereePanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        refereePanel.setBackground(new Color(24, 34, 26));
+        refereePanel.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createLineBorder(new Color(50, 90, 55), 1),
+            new EmptyBorder(8, 8, 8, 8)));
         refereePanel.setAlignmentX(LEFT_ALIGNMENT);
         refereePanel.setVisible(false);
 
-        JLabel refTitle = new JLabel("REFEREE");
+        JLabel refTitle = new JLabel("REFEREE CONTROLS");
         refTitle.setForeground(COLOR_REFEREE);
         refTitle.setFont(FontManager.getRunescapeSmallFont());
         refTitle.setAlignmentX(LEFT_ALIGNMENT);
@@ -452,12 +514,12 @@ public class GnomeballPanel extends PluginPanel
         timerToggleBtn.addActionListener(e -> plugin.onTimerStartStopClicked());
 
         refereePanel.add(refTitle);
-        refereePanel.add(Box.createVerticalStrut(4));
+        refereePanel.add(Box.createVerticalStrut(6));
         refereePanel.add(whistleBtn);
         refereePanel.add(Box.createVerticalStrut(4));
         refereePanel.add(timerToggleBtn);
-        card.add(Box.createVerticalStrut(4));
         card.add(refereePanel);
+        card.add(Box.createVerticalStrut(4));
 
         // Leave game (all)
         leaveGameBtn.setAlignmentX(LEFT_ALIGNMENT);
@@ -492,10 +554,10 @@ public class GnomeballPanel extends PluginPanel
                 cardLayout.show(cardPanel, "IN_GAME");
                 joinCodeValueLabel.setText(jc != null ? jc : "—");
                 refreshScoreboard();
-                gridPanel.setVisible(isHost);
+                hostControlsCard.setVisible(isHost);
                 refreshGridButton();
                 hostPreStartPanel.setVisible(isHost);
-                endGameBtn.setVisible(false);
+                hostInGamePanel.setVisible(false);
                 refereePanel.setVisible(false);
                 leaveGameBtn.setVisible(true);
                 refreshRoster(plugin.getRoster().snapshot());
@@ -506,10 +568,10 @@ public class GnomeballPanel extends PluginPanel
                 cardLayout.show(cardPanel, "IN_GAME");
                 joinCodeValueLabel.setText(jc != null ? jc : "—");
                 refreshScoreboard();
-                gridPanel.setVisible(isHost);
+                hostControlsCard.setVisible(isHost);
                 refreshGridButton();
                 hostPreStartPanel.setVisible(false);
-                endGameBtn.setVisible(isHost);
+                hostInGamePanel.setVisible(isHost);
                 refereePanel.setVisible(plugin.isReferee());
                 timerToggleBtn.setText(plugin.isTimerPaused() ? "START" : "STOP");
                 leaveGameBtn.setVisible(true);
@@ -520,8 +582,7 @@ public class GnomeballPanel extends PluginPanel
                 setStatus("Ended", new Color(140, 60, 60));
                 cardLayout.show(cardPanel, "IN_GAME");
                 refreshScoreboard();
-                hostPreStartPanel.setVisible(false);
-                endGameBtn.setVisible(false);
+                hostControlsCard.setVisible(false);
                 refereePanel.setVisible(false);
                 leaveGameBtn.setVisible(true);
                 refreshRoster(plugin.getRoster().snapshot());
@@ -579,6 +640,11 @@ public class GnomeballPanel extends PluginPanel
                 attachPopup(row, popup);
                 attachPopup(numLabel, popup);
                 attachPopup(nameLabel, popup);
+
+                String hint = "Right-click to manage " + entry.rsn;
+                row.setToolTipText(hint);
+                numLabel.setToolTipText(hint);
+                nameLabel.setToolTipText(hint);
             }
 
             rosterTablePanel.add(row);
@@ -592,7 +658,7 @@ public class GnomeballPanel extends PluginPanel
     {
         JPopupMenu popup = new JPopupMenu();
 
-        if (current != GnomeballRole.REFEREE && plugin.getPhase() == GamePhase.ACTIVE)
+        if (plugin.getPhase() == GamePhase.ACTIVE)
         {
             String bh = plugin.getBallHolder();
             boolean hasBall = bh != null && bh.equalsIgnoreCase(rsn);

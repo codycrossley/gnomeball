@@ -1,6 +1,8 @@
 package gay.runescape.gnomeball;
 
 import java.awt.*;
+import java.util.ArrayList;
+import java.util.List;
 import net.runelite.api.Client;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.overlay.*;
@@ -115,6 +117,7 @@ public class TimerOverlay extends Overlay
         renderGoalFlash(g);
         renderWhistleFlash(g);
         renderInterceptionFlash(g);
+        renderHostMessageFlash(g);
 
         return new Dimension(boxW, boxH);
     }
@@ -276,6 +279,77 @@ public class TimerOverlay extends Overlay
         g.drawString(interceptingPlayer, nameX + 2, nameY + 2);
         g.setColor(nameColor);
         g.drawString(interceptingPlayer, nameX, nameY);
+    }
+
+    private static final Font hostMessageFont = FontManager.getRunescapeBoldFont().deriveFont(20f);
+
+    private void renderHostMessageFlash(Graphics2D g)
+    {
+        long flashUntil = plugin.getHostMessageFlashUntil();
+        long remaining = flashUntil - System.currentTimeMillis();
+        if (remaining <= 0) return;
+
+        String message = plugin.getHostMessageText();
+        if (message == null) return;
+
+        float alpha = Math.min(1f, remaining / 500f);
+        Color headerColor = withAlpha(COLOR_REFEREE, alpha);
+        Color messageColor = withAlpha(COLOR_PLENTY, alpha);
+        Color shadowColor = new Color(0, 0, 0, (int) (180 * alpha));
+
+        int canvasW = client.getCanvasWidth();
+        int canvasH = client.getCanvasHeight();
+
+        g.setFont(goalScoreFont);
+        FontMetrics headerFm = g.getFontMetrics();
+        String headerText = "ANNOUNCEMENT";
+        int headerW = headerFm.stringWidth(headerText);
+        int headerX = (canvasW - headerW) / 2;
+        int headerY = canvasH / 3;
+
+        g.setColor(shadowColor);
+        g.drawString(headerText, headerX + 2, headerY + 2);
+        g.setColor(headerColor);
+        g.drawString(headerText, headerX, headerY);
+
+        g.setFont(hostMessageFont);
+        FontMetrics msgFm = g.getFontMetrics();
+        List<String> lines = wrapText(message, msgFm, (int) (canvasW * 0.8));
+
+        int lineY = headerY + headerFm.getHeight() + 8;
+        for (String line : lines)
+        {
+            int lineW = msgFm.stringWidth(line);
+            int lineX = (canvasW - lineW) / 2;
+
+            g.setColor(shadowColor);
+            g.drawString(line, lineX + 2, lineY + 2);
+            g.setColor(messageColor);
+            g.drawString(line, lineX, lineY);
+
+            lineY += msgFm.getHeight() + 4;
+        }
+    }
+
+    private static List<String> wrapText(String text, FontMetrics fm, int maxWidth)
+    {
+        List<String> lines = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (String word : text.split("\\s+"))
+        {
+            String candidate = current.length() == 0 ? word : current + " " + word;
+            if (current.length() > 0 && fm.stringWidth(candidate) > maxWidth)
+            {
+                lines.add(current.toString());
+                current = new StringBuilder(word);
+            }
+            else
+            {
+                current = new StringBuilder(candidate);
+            }
+        }
+        if (current.length() > 0) lines.add(current.toString());
+        return lines;
     }
 
     private static Color withAlpha(Color c, float alpha)

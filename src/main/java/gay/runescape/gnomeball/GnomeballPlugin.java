@@ -59,6 +59,7 @@ public class GnomeballPlugin extends Plugin
     private static final String KEY_DEADLINE  = "activeDeadlineMs";
 
     private static final int    GNOMEBALL_ITEM_ID = 2528;
+    private static final int    PEACEFUL_HANDEGG_ITEM_ID = 9470; // F2P-accessible substitute for the Gnomeball
     private static final String COLOR_REFEREE = "3CB34A";
     private static final String COLOR_TEAM_A  = "3C78DC";
     private static final String COLOR_TEAM_B  = "C83C3C";
@@ -67,6 +68,7 @@ public class GnomeballPlugin extends Plugin
     private static final int    TAG_SPOTANIM_ID = 80;
     private static final int    ITEM_RUBBER_CHICKEN = 4566;
     private static final int    ITEM_STALE_BAGUETTE = 20590;
+    private static final long   TAG_IMMUNITY_MS = 1200; // 2 game ticks @ 600ms each
 
     @Inject private Client client;
     @Inject private ClientThread clientThread;
@@ -125,6 +127,9 @@ public class GnomeballPlugin extends Plugin
     private volatile WorldPoint lastSelfPosition = null;
     private volatile String ballHolder   = null;
     private volatile String tagObligationTagger = null;
+    private volatile String tagImmunePlayer = null;
+    private volatile long   tagImmuneUntil = 0;
+    private volatile boolean goalObligationActive = false;
     private volatile long   interceptionFlashUntil = 0;
     private volatile String interceptionPlayer     = null;
     private volatile String interceptionTeam       = null;
@@ -133,6 +138,8 @@ public class GnomeballPlugin extends Plugin
     private volatile int goalFlashOldScore = 0;
     private volatile int goalFlashNewScore = 0;
     private volatile long whistleFlashUntil = 0;
+    private volatile String hostMessageText = null;
+    private volatile long hostMessageFlashUntil = 0;
     private volatile boolean timerPaused = false;
     private volatile long pausedRemainingMs = 0;
 
@@ -291,6 +298,9 @@ public class GnomeballPlugin extends Plugin
 
         if (phase != GamePhase.ACTIVE || timerPaused || ballHolder == null) return;
 
+        // Scoring is disabled until the ball is delivered to a referee
+        if (goalObligationActive) return;
+
         String localRsn = localRsn();
         if (localRsn == null || !ballHolder.equalsIgnoreCase(localRsn)) return;
 
@@ -310,14 +320,15 @@ public class GnomeballPlugin extends Plugin
         int oldScore = "TEAM_A".equals(scoringTeam) ? teamAScore : teamBScore;
         int newScore = oldScore + 1;
 
-        // Optimistic local update — prevents re-triggering on subsequent ticks and shows flash immediately
+        // Optimistic local update — goalObligationActive gates further scoring until a referee gets the ball
         goalFlashTeam     = scoringTeam;
         goalFlashOldScore = oldScore;
         goalFlashNewScore = newScore;
         goalFlashUntil    = System.currentTimeMillis() + 3000;
         if ("TEAM_A".equals(scoringTeam)) teamAScore = newScore;
         else                              teamBScore = newScore;
-        ballHolder = null;
+        goalObligationActive = true;
+        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "You scored! Please pass the Gnomeball to a referee.", null);
         SwingUtilities.invokeLater(() -> panel.refresh());
 
         final String gid = gameId;
@@ -334,23 +345,48 @@ public class GnomeballPlugin extends Plugin
     public void onMenuOptionClicked(MenuOptionClicked event)
     {
         if (phase != GamePhase.ACTIVE) return;
+
+        if (event.getMenuEntry().getActor() instanceof Player)
+        {
+            log.debug("Player-targeted menu click: action={} option={} target={}",
+                event.getMenuAction(), event.getMenuOption(), event.getMenuTarget());
+        }
+
         if (event.getMenuAction() != MenuAction.WIDGET_TARGET_ON_PLAYER) return;
 
         String localRsn = localRsn();
         if (localRsn == null) return;
 
         // Must currently hold the ball
-        if (ballHolder == null || !ballHolder.equalsIgnoreCase(localRsn)) return;
+        if (ballHolder == null || !ballHolder.equalsIgnoreCase(localRsn))
+        {
+            log.debug("Pass blocked: not ball holder (ballHolder={}, self={})", ballHolder, localRsn);
+            return;
+        }
 
         // Must be an enlisted team player
         GnomeballRole myRole = rosterReducer.getRole(localRsn);
-        if (myRole != GnomeballRole.TEAM_A && myRole != GnomeballRole.TEAM_B) return;
+        if (myRole != GnomeballRole.TEAM_A && myRole != GnomeballRole.TEAM_B)
+        {
+            log.debug("Pass blocked: sender role is {}", myRole);
+            return;
+        }
 
-        // Must be throwing a gnomeball
+        // Must be throwing a gnomeball (or the F2P-friendly Peaceful handegg)
         ItemContainer inv = client.getItemContainer(InventoryID.INVENTORY);
         if (inv == null) return;
         Item item = inv.getItem(event.getParam0());
-        if (item == null || item.getId() != GNOMEBALL_ITEM_ID) return;
+        if (item == null)
+        {
+            log.debug("Pass blocked: no item at inventory slot {}", event.getParam0());
+            return;
+        }
+        int itemId = item.getId();
+        if (itemId != GNOMEBALL_ITEM_ID && itemId != PEACEFUL_HANDEGG_ITEM_ID)
+        {
+            log.debug("Pass blocked: item id {} is not a gnomeball/handegg", itemId);
+            return;
+        }
 
         // Target must have a free weapon slot
         if (!(event.getMenuEntry().getActor() instanceof Player)) return;
@@ -360,7 +396,12 @@ public class GnomeballPlugin extends Plugin
         PlayerComposition comp = target.getPlayerComposition();
         if (comp == null) return;
         int[] equipIds = comp.getEquipmentIds();
-        if (equipIds == null || equipIds[KitType.WEAPON.getIndex()] != 0) return;
+        if (equipIds == null || equipIds[KitType.WEAPON.getIndex()] != 0)
+        {
+            log.debug("Pass blocked: target weapon slot not free (raw id={})",
+                equipIds != null ? equipIds[KitType.WEAPON.getIndex()] : "null-array");
+            return;
+        }
 
         String targetRsn = Text.toJagexName(target.getName());
         if (targetRsn == null || targetRsn.isBlank()) return;
@@ -388,6 +429,9 @@ public class GnomeballPlugin extends Plugin
 
         // Only the current ball holder can be tagged
         if (ballHolder == null || !ballHolder.equalsIgnoreCase(selfRsn)) return;
+
+        // Brief immunity after receiving the ball back from a fulfilled tag
+        if (tagImmunePlayer != null && tagImmunePlayer.equalsIgnoreCase(selfRsn) && System.currentTimeMillis() < tagImmuneUntil) return;
 
         // The attacker must actually be targeting the local (ball-holding) player.
         // getInteracting() can lag a tick behind the animation when the attacker had to walk
@@ -748,6 +792,7 @@ public class GnomeballPlugin extends Plugin
                         goalFlashOldScore = teamAScore;
                         goalFlashNewScore = score;
                         goalFlashUntil = System.currentTimeMillis() + 3000;
+                        goalObligationActive = true;
                     }
                     teamAScore = score;
                 }
@@ -759,6 +804,7 @@ public class GnomeballPlugin extends Plugin
                         goalFlashOldScore = teamBScore;
                         goalFlashNewScore = score;
                         goalFlashUntil = System.currentTimeMillis() + 3000;
+                        goalObligationActive = true;
                     }
                     teamBScore = score;
                 }
@@ -773,6 +819,16 @@ public class GnomeballPlugin extends Plugin
                     timerPaused = true;
                 }
                 whistleFlashUntil = System.currentTimeMillis() + 3000;
+                break;
+            }
+            case "HOST_MESSAGE":
+            {
+                String message = safeStr(e.payload, "message");
+                if (message != null && !message.isBlank())
+                {
+                    hostMessageText = message;
+                    hostMessageFlashUntil = System.currentTimeMillis() + 5000;
+                }
                 break;
             }
             case "TIMER_PAUSED":
@@ -811,14 +867,24 @@ public class GnomeballPlugin extends Plugin
                 if (fulfillsTagObligation)
                 {
                     tagObligationTagger = null;
+                    tagImmunePlayer = newHolder;
+                    tagImmuneUntil = System.currentTimeMillis() + TAG_IMMUNITY_MS;
+                }
+                if (goalObligationActive && newHolder != null && rosterReducer.getRole(newHolder) == GnomeballRole.REFEREE)
+                {
+                    goalObligationActive = false;
                 }
                 ballHolder = newHolder;
                 break;
             }
             case "BALL_CLEARED":
             {
+                // No longer auto-fired after a goal — this is now purely the host's manual "Clear Ball"
+                // action, which doubles as an override to release a stuck goal obligation (e.g. a rogue
+                // player who won't return the ball to a referee).
                 ballHolder = null;
                 tagObligationTagger = null;
+                goalObligationActive = false;
                 break;
             }
             case "PLAYER_TAGGED":
@@ -858,7 +924,21 @@ public class GnomeballPlugin extends Plugin
 
         String taggerNumber = rosterReducer.getNumber(tagger);
         String label = (taggerNumber != null && !taggerNumber.isEmpty()) ? tagger + " (" + taggerNumber + ")" : tagger;
+        String colorHex = roleColorHex(rosterReducer.getRole(tagger));
+        if (colorHex != null) label = "<col=" + colorHex + ">" + label + "</col>";
         client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "You've been tagged! You must pass the Gnomeball to " + label + ".", null);
+    }
+
+    private static String roleColorHex(GnomeballRole role)
+    {
+        if (role == null) return null;
+        switch (role)
+        {
+            case TEAM_A:   return COLOR_TEAM_A;
+            case TEAM_B:   return COLOR_TEAM_B;
+            case REFEREE:  return COLOR_REFEREE;
+            default:       return null;
+        }
     }
 
     /** Plays the STUNNED spotanim on a named player. Must be called on the client thread. */
@@ -1051,6 +1131,19 @@ public class GnomeballPlugin extends Plugin
         });
     }
 
+    public void onBroadcastMessageClicked(String message)
+    {
+        if (!isHost() || gameId == null) return;
+        if (message == null) return;
+        final String trimmed = message.trim();
+        if (trimmed.isEmpty()) return;
+        executor.submit(() ->
+        {
+            try { apiClient.broadcastMessage(gameId, writeKey, trimmed); }
+            catch (Exception ex) { log.warn("Broadcast message failed: {}", ex.getMessage()); }
+        });
+    }
+
     private void onPassBallClicked(String targetRsn)
     {
         final String gid = gameId;
@@ -1146,10 +1239,13 @@ public class GnomeballPlugin extends Plugin
     public int           getGoalFlashOldScore() { return goalFlashOldScore; }
     public int           getGoalFlashNewScore() { return goalFlashNewScore; }
     public long          getWhistleFlashUntil() { return whistleFlashUntil; }
+    public String        getHostMessageText()      { return hostMessageText; }
+    public long          getHostMessageFlashUntil() { return hostMessageFlashUntil; }
     public boolean       isTimerPaused()        { return timerPaused; }
     public long          getPausedRemainingMs() { return pausedRemainingMs; }
     public String        getBallHolder()              { return ballHolder; }
     public String        getTagObligationTagger()     { return tagObligationTagger; }
+    public boolean        isGoalObligationActive()    { return goalObligationActive; }
     public long          getInterceptionFlashUntil() { return interceptionFlashUntil; }
     public String        getInterceptionPlayer()     { return interceptionPlayer; }
     public String        getInterceptionTeam()       { return interceptionTeam; }
@@ -1352,6 +1448,8 @@ public class GnomeballPlugin extends Plugin
         teamAName = "Team A"; teamBName = "Team B"; teamAScore = 0; teamBScore = 0;
         timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0; ballHolder = null;
         tagObligationTagger = null;
+        tagImmunePlayer = null; tagImmuneUntil = 0;
+        goalObligationActive = false;
         interceptionFlashUntil = 0; interceptionPlayer = null; interceptionTeam = null;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
