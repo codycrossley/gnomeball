@@ -1,0 +1,14 @@
+# Build output
+build/
+out/
+
+# Gradle internals
+.gradle/
+
+# IntelliJ
+.idea/
+*.iml
+
+# macOS
+.DS_Store
+**/.DS_Store
