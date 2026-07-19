@@ -110,7 +110,22 @@ public class PlayerOverlay extends Overlay
 
             String owedTo = plugin.getTagObligationTagger();
             boolean owedTag = owedTo != null && owedTo.equalsIgnoreCase(rsn);
-            boolean owedGoal = plugin.isGoalObligationActive() && role == GnomeballRole.REFEREE;
+            boolean owedGoal = false;
+            if (plugin.isGoalObligationActive())
+            {
+                if (role == GnomeballRole.REFEREE)
+                {
+                    owedGoal = true;
+                }
+                else if (roster.countRole(GnomeballRole.REFEREE) == 0)
+                {
+                    // No referee currently in the game — fall back to highlighting the
+                    // opposing team as the valid delivery target.
+                    String obligationTeam = plugin.getObligationTeam();
+                    GnomeballRole opposingRole = "TEAM_A".equals(obligationTeam) ? GnomeballRole.TEAM_B : GnomeballRole.TEAM_A;
+                    owedGoal = role == opposingRole;
+                }
+            }
             if (owedTag || owedGoal)
             {
                 drawTagArrow(g, cx, hasBall ? topY - 16 : topY);

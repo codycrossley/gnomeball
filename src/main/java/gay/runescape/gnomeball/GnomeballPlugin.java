@@ -132,6 +132,7 @@ public class GnomeballPlugin extends Plugin
     private volatile String tagImmunePlayer = null;
     private volatile long   tagImmuneUntil = 0;
     private volatile boolean goalObligationActive = false;
+    private volatile String obligationTeam = null; // "TEAM_A" or "TEAM_B" — the team that scored and owes the obligation
     private volatile long   interceptionFlashUntil = 0;
     private volatile String interceptionPlayer     = null;
     private volatile String interceptionTeam       = null;
@@ -239,6 +240,13 @@ public class GnomeballPlugin extends Plugin
             gameId = null; writeKey = null; joinCode = null; hostRsn = null;
             phase = GamePhase.DISCONNECTED; deadlineMs = 0; winner = null;
             teamAName = "Team A"; teamBName = "Team B"; teamAScore = 0; teamBScore = 0;
+            timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0; ballHolder = null;
+            tagObligationTagger = null;
+            tagImmunePlayer = null; tagImmuneUntil = 0;
+            goalObligationActive = false; obligationTeam = null;
+            goalFlashUntil = 0; goalFlashTeam = null; goalFlashOldScore = 0; goalFlashNewScore = 0;
+            interceptionFlashUntil = 0; interceptionPlayer = null; interceptionTeam = null;
+            hostMessageText = null; hostMessageFlashUntil = 0;
             if (rosterReducer != null) rosterReducer.reset();
             if (tileReducer != null) tileReducer.reset();
             SwingUtilities.invokeLater(() -> panel.refresh());
@@ -322,15 +330,20 @@ public class GnomeballPlugin extends Plugin
         int oldScore = "TEAM_A".equals(scoringTeam) ? teamAScore : teamBScore;
         int newScore = oldScore + 1;
 
-        // Optimistic local update — goalObligationActive gates further scoring until a referee gets the ball
+        // Optimistic flash preview only — the actual teamAScore/teamBScore increment happens
+        // exclusively in the GOAL_SCORED event handler (below), once the server echoes this
+        // goal back over the poll. GOAL_SCORED is a delta, so applying it here too would
+        // double-count on the scorer's own client once that echo arrives.
         goalFlashTeam     = scoringTeam;
         goalFlashOldScore = oldScore;
         goalFlashNewScore = newScore;
         goalFlashUntil    = System.currentTimeMillis() + 3000;
-        if ("TEAM_A".equals(scoringTeam)) teamAScore = newScore;
-        else                              teamBScore = newScore;
         goalObligationActive = true;
-        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "You scored! Please pass the Gnomeball to a referee.", null);
+        obligationTeam = scoringTeam;
+        String deliveryTarget = rosterReducer.countRole(GnomeballRole.REFEREE) == 0
+            ? "a member of the opposing team"
+            : "a referee";
+        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "You scored! Please pass the Gnomeball to " + deliveryTarget + ".", null);
         SwingUtilities.invokeLater(() -> panel.refresh());
 
         final String gid = gameId;
@@ -784,6 +797,8 @@ public class GnomeballPlugin extends Plugin
             }
             case "SCORE_UPDATED":
             {
+                // Absolute score set — host correction (scoreboard +/- buttons) only.
+                // Never implies a goal was scored, so it does not arm the obligation.
                 String team = safeStr(e.payload, "team");
                 int score = safeInt(e.payload, "score");
                 if ("TEAM_A".equals(team))
@@ -794,7 +809,6 @@ public class GnomeballPlugin extends Plugin
                         goalFlashOldScore = teamAScore;
                         goalFlashNewScore = score;
                         goalFlashUntil = System.currentTimeMillis() + 3000;
-                        goalObligationActive = true;
                     }
                     teamAScore = score;
                 }
@@ -806,10 +820,32 @@ public class GnomeballPlugin extends Plugin
                         goalFlashOldScore = teamBScore;
                         goalFlashNewScore = score;
                         goalFlashUntil = System.currentTimeMillis() + 3000;
-                        goalObligationActive = true;
                     }
                     teamBScore = score;
                 }
+                break;
+            }
+            case "GOAL_SCORED":
+            {
+                // Real zone-goal — delta increment that also arms the obligation to
+                // deliver the ball to a referee before scoring can resume.
+                String team = safeStr(e.payload, "team");
+                if ("TEAM_A".equals(team))
+                {
+                    goalFlashTeam = "TEAM_A";
+                    goalFlashOldScore = teamAScore;
+                    goalFlashNewScore = ++teamAScore;
+                    goalFlashUntil = System.currentTimeMillis() + 3000;
+                }
+                else if ("TEAM_B".equals(team))
+                {
+                    goalFlashTeam = "TEAM_B";
+                    goalFlashOldScore = teamBScore;
+                    goalFlashNewScore = ++teamBScore;
+                    goalFlashUntil = System.currentTimeMillis() + 3000;
+                }
+                goalObligationActive = true;
+                obligationTeam = team;
                 break;
             }
             case "WHISTLE_BLOWN":
@@ -872,9 +908,22 @@ public class GnomeballPlugin extends Plugin
                     tagImmunePlayer = newHolder;
                     tagImmuneUntil = System.currentTimeMillis() + TAG_IMMUNITY_MS;
                 }
-                if (goalObligationActive && newHolder != null && rosterReducer.getRole(newHolder) == GnomeballRole.REFEREE)
+                if (goalObligationActive && newHolder != null)
                 {
-                    goalObligationActive = false;
+                    GnomeballRole newHolderRole = rosterReducer.getRole(newHolder);
+                    boolean fulfillsObligation = newHolderRole == GnomeballRole.REFEREE;
+                    if (!fulfillsObligation && rosterReducer.countRole(GnomeballRole.REFEREE) == 0 && obligationTeam != null)
+                    {
+                        // No referee currently in the game — fall back to requiring delivery
+                        // to a member of the opposing team instead.
+                        GnomeballRole opposingRole = "TEAM_A".equals(obligationTeam) ? GnomeballRole.TEAM_B : GnomeballRole.TEAM_A;
+                        fulfillsObligation = newHolderRole == opposingRole;
+                    }
+                    if (fulfillsObligation)
+                    {
+                        goalObligationActive = false;
+                        obligationTeam = null;
+                    }
                 }
                 ballHolder = newHolder;
                 break;
@@ -887,6 +936,7 @@ public class GnomeballPlugin extends Plugin
                 ballHolder = null;
                 tagObligationTagger = null;
                 goalObligationActive = false;
+                obligationTeam = null;
                 break;
             }
             case "PLAYER_TAGGED":
@@ -993,6 +1043,11 @@ public class GnomeballPlugin extends Plugin
         teamAScore = snap.teamAScore;
         teamBScore = snap.teamBScore;
         if (snap.ballHolder != null) ballHolder = snap.ballHolder;
+        if (snap.obligationActive != null)
+        {
+            goalObligationActive = snap.obligationActive;
+            obligationTeam = snap.obligationActive ? snap.obligationTeam : null;
+        }
 
         if (snap.status != null)
         {
@@ -1248,6 +1303,7 @@ public class GnomeballPlugin extends Plugin
     public String        getBallHolder()              { return ballHolder; }
     public String        getTagObligationTagger()     { return tagObligationTagger; }
     public boolean        isGoalObligationActive()    { return goalObligationActive; }
+    public String         getObligationTeam()         { return obligationTeam; }
     public long          getInterceptionFlashUntil() { return interceptionFlashUntil; }
     public String        getInterceptionPlayer()     { return interceptionPlayer; }
     public String        getInterceptionTeam()       { return interceptionTeam; }
@@ -1451,7 +1507,7 @@ public class GnomeballPlugin extends Plugin
         timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0; ballHolder = null;
         tagObligationTagger = null;
         tagImmunePlayer = null; tagImmuneUntil = 0;
-        goalObligationActive = false;
+        goalObligationActive = false; obligationTeam = null;
         interceptionFlashUntil = 0; interceptionPlayer = null; interceptionTeam = null;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();

@@ -13,8 +13,8 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class ApiClient
 {
-    static final String BASE_URL = "https://gnomeball.runescape.gay/gnomeball";
-    //static final String BASE_URL = "http://localhost:8002/gnomeball";
+    //static final String BASE_URL = "https://gnomeball.runescape.gay/gnomeball";
+    static final String BASE_URL = "http://localhost:8002/gnomeball";
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 
@@ -429,6 +429,9 @@ public class ApiClient
         public String teamBName;
         public int teamAScore;
         public int teamBScore;
+        public Boolean obligationActive;
+        public String obligationTeam;
+        public String obligationScorer;
         public List<RosterPlayerOut> players;
     }
 
