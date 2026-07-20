@@ -1,9 +1,13 @@
 package gay.runescape.gnomeball;
 
 import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
+import java.lang.reflect.Type;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -58,6 +62,8 @@ public class GnomeballPlugin extends Plugin
     private static final String KEY_HOST_RSN  = "activeHostRsn";
     private static final String KEY_PHASE     = "activePhase";
     private static final String KEY_DEADLINE  = "activeDeadlineMs";
+    private static final String KEY_CUSTOM_FIELD_SLOTS = "customFieldSlots";
+    private static final int CUSTOM_SLOT_COUNT = 3;
 
     private static final int    GNOMEBALL_ITEM_ID = 2528;
     private static final int    PEACEFUL_HANDEGG_ITEM_ID = 9470; // F2P-accessible substitute for the Gnomeball
@@ -108,6 +114,15 @@ public class GnomeballPlugin extends Plugin
     private volatile ScheduledFuture<?> heartbeatFuture = null;
     private volatile ScheduledFuture<?> onlineRefreshFuture = null;
 
+    // Throttles roster refetches triggered by PLAYER_JOINED/ROLE_ASSIGNED/PLAYER_LEFT events.
+    // A poll batch can contain several such events at once, and at scale (many clients, players
+    // joining in a burst) each client re-fetching the full roster per individual event multiplies
+    // load on the server well beyond what's needed — a leading+trailing throttle collapses any
+    // burst within the window into at most one immediate fetch plus one trailing catch-up fetch.
+    private static final long ROSTER_REFRESH_THROTTLE_MS = 2000;
+    private volatile long lastRosterFetchMs = 0;
+    private volatile ScheduledFuture<?> pendingRosterRefresh = null;
+
     // ---- game state ----
     private volatile String gameId   = null;
     private volatile String writeKey = null;
@@ -120,10 +135,11 @@ public class GnomeballPlugin extends Plugin
     private volatile String teamBName = "Team B";
     private volatile int teamAScore = 0;
     private volatile int teamBScore = 0;
-    private volatile boolean gridPlacementMode = false;
-    private volatile boolean gridRemovalMode = false;
-    private volatile int gridWidth = 5;
-    private volatile int gridHeight = 5;
+    private volatile boolean presetPlacementMode = false;
+    private volatile boolean presetRemovalMode = false;
+    private volatile FieldPreset selectedPreset = null;
+    private volatile int presetRotationSteps = 0; // quarter-turns clockwise: 0/1/2/3 = 0/90/180/270 degrees
+    private final FieldPreset[] customSlots = new FieldPreset[CUSTOM_SLOT_COUNT]; // null = empty slot
     private volatile String zoneTeam = null; // "TEAM_A" or "TEAM_B"
     private final Set<WorldPoint> zoneTiles = new HashSet<>();
     private volatile WorldPoint lastSelfPosition = null;
@@ -156,6 +172,7 @@ public class GnomeballPlugin extends Plugin
         apiClient     = new ApiClient(okHttpClient, gson);
         rosterReducer = new RosterReducer();
         tileReducer   = new TileReducer();
+        loadCustomFieldSlots();
 
         panel = new GnomeballPanel(this);
         BufferedImage icon = ImageUtil.loadImageResource(getClass(), "panel_icon.png");
@@ -261,14 +278,14 @@ public class GnomeballPlugin extends Plugin
 
         if ("Walk here".equals(event.getOption()))
         {
+            if (presetPlacementMode || presetRemovalMode)
+            {
+                addPresetMenuEntries();
+                return;
+            }
             if (zoneTeam != null)
             {
                 addZoneMenuEntries();
-                return;
-            }
-            if (gridPlacementMode || gridRemovalMode)
-            {
-                addGridMenuEntries();
                 return;
             }
             addTileMenuEntries(event);
@@ -343,7 +360,7 @@ public class GnomeballPlugin extends Plugin
         String deliveryTarget = rosterReducer.countRole(GnomeballRole.REFEREE) == 0
             ? "a member of the opposing team"
             : "a referee";
-        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "You scored! Please pass the Gnomeball to " + deliveryTarget + ".", null);
+        addChatMessage("You scored! Please pass the Gnomeball to " + deliveryTarget + ".");
         SwingUtilities.invokeLater(() -> panel.refresh());
 
         final String gid = gameId;
@@ -537,128 +554,107 @@ public class GnomeballPlugin extends Plugin
     {
         if (!isHost() || gameId == null || zoneTeam == null || zoneTiles.isEmpty()) return;
 
-        String colorHex = "TEAM_A".equals(zoneTeam) ? "#3C78DC" : "#C83C3C";
         String zoneType = "TEAM_A".equals(zoneTeam) ? "ZONE_A" : "ZONE_B";
         Set<WorldPoint> tiles = new HashSet<>(zoneTiles);
         cancelZoneMode();
 
-        executor.submit(() ->
-        {
-            // Boundary edges — per-tile try/catch so one failure doesn't abort the rest
-            for (WorldPoint wp : tiles)
-            {
-                int x = wp.getX(), y = wp.getY(), plane = wp.getPlane();
-                try
-                {
-                    if (!tiles.contains(new WorldPoint(x, y + 1, plane)))
-                        apiClient.markTile(gameId, writeKey, x, y, plane, "BOUNDARY_N", colorHex);
-                    if (!tiles.contains(new WorldPoint(x, y - 1, plane)))
-                        apiClient.markTile(gameId, writeKey, x, y, plane, "BOUNDARY_S", colorHex);
-                    if (!tiles.contains(new WorldPoint(x + 1, y, plane)))
-                        apiClient.markTile(gameId, writeKey, x, y, plane, "BOUNDARY_E", colorHex);
-                    if (!tiles.contains(new WorldPoint(x - 1, y, plane)))
-                        apiClient.markTile(gameId, writeKey, x, y, plane, "BOUNDARY_W", colorHex);
-                }
-                catch (Exception ex) { log.warn("Zone boundary mark failed at {},{}: {}", x, y, ex.getMessage()); }
-            }
-
-            // Zone detection tiles — separate pass so any failure here never affects boundary rendering
-            for (WorldPoint wp : tiles)
-            {
-                try { apiClient.markTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), zoneType, null); }
-                catch (Exception ex) { log.warn("Zone detection mark failed at {},{}: {}", wp.getX(), wp.getY(), ex.getMessage()); }
-            }
-        });
+        executor.submit(() -> markZoneTiles(tiles, zoneType));
     }
 
-    private void addGridMenuEntries()
+    /** Marks every tile in an arbitrary tile set as the given zone type. Must be called from a
+     * background thread. Zone tiles render filled with their own type-based color — no separate
+     * boundary marking is needed. */
+    private void markZoneTiles(Set<WorldPoint> tiles, String zoneType)
+    {
+        for (WorldPoint wp : tiles)
+        {
+            try { apiClient.markTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), zoneType, null); }
+            catch (Exception ex) { log.warn("Zone tile mark failed at {},{}: {}", wp.getX(), wp.getY(), ex.getMessage()); }
+        }
+    }
+
+    private void addPresetMenuEntries()
     {
         Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
         if (tile == null) return;
         WorldPoint center = tile.getWorldLocation();
         if (center == null) return;
+        FieldPreset preset = selectedPreset;
+        if (preset == null) return;
 
         client.createMenuEntry(-1)
             .setOption("Cancel")
             .setTarget("")
             .setType(MenuAction.RUNELITE)
-            .onClick(me -> cancelGridMode());
+            .onClick(me -> cancelPresetMode());
 
-        if (gridPlacementMode)
+        client.createMenuEntry(-1)
+            .setOption("Rotate Field")
+            .setTarget("")
+            .setType(MenuAction.RUNELITE)
+            .onClick(me -> rotatePresetNext());
+
+        int degrees = presetRotationSteps * 90;
+        String suffix = degrees != 0 ? " (" + degrees + "°)" : "";
+        if (presetRemovalMode)
         {
             client.createMenuEntry(-1)
-                .setOption("<col=00FF00>Place Grid (" + gridWidth + "x" + gridHeight + ")</col>")
+                .setOption("<col=FF4444>Remove " + preset.name + suffix + "</col>")
                 .setTarget("")
                 .setType(MenuAction.RUNELITE)
-                .onClick(me -> commitGrid(center));
+                .onClick(me -> removePreset(center));
         }
-        else if (gridRemovalMode)
+        else
         {
             client.createMenuEntry(-1)
-                .setOption("<col=FF4444>Remove Grid (" + gridWidth + "x" + gridHeight + ")</col>")
+                .setOption("<col=00FF00>Place " + preset.name + suffix + "</col>")
                 .setTarget("")
                 .setType(MenuAction.RUNELITE)
-                .onClick(me -> removeGrid(center));
+                .onClick(me -> commitPreset(center));
         }
     }
 
-    private void commitGrid(WorldPoint center)
+    private void commitPreset(WorldPoint center)
     {
-        cancelGridMode();
-        if (!isHost() || gameId == null) return;
+        FieldPreset preset = selectedPreset;
+        int rotationSteps = presetRotationSteps;
+        cancelPresetMode();
+        if (!isHost() || gameId == null || preset == null) return;
 
-        int startX = center.getX() - gridWidth / 2;
-        int startY = center.getY() - gridHeight / 2;
-        int endX = startX + gridWidth - 1;
-        int endY = startY + gridHeight - 1;
-        int plane = center.getPlane();
+        List<FieldPreset.PlacedTile> placedTiles = preset.layout(center, rotationSteps);
 
         executor.submit(() ->
         {
-            try
+            for (FieldPreset.PlacedTile pt : placedTiles)
             {
-                for (int x = startX; x <= endX; x++)
-                {
-                    apiClient.markTile(gameId, writeKey, x, startY, plane, "BOUNDARY_S", null);
-                    apiClient.markTile(gameId, writeKey, x, endY, plane, "BOUNDARY_N", null);
-                }
-                for (int y = startY; y <= endY; y++)
-                {
-                    apiClient.markTile(gameId, writeKey, startX, y, plane, "BOUNDARY_W", null);
-                    apiClient.markTile(gameId, writeKey, endX, y, plane, "BOUNDARY_E", null);
-                }
+                try { apiClient.markTile(gameId, writeKey, pt.point.getX(), pt.point.getY(), pt.point.getPlane(), pt.tileType, pt.color); }
+                catch (Exception ex) { log.warn("Commit preset tile failed at {},{}: {}", pt.point.getX(), pt.point.getY(), ex.getMessage()); }
             }
-            catch (Exception ex) { log.warn("Commit grid failed: {}", ex.getMessage()); }
         });
     }
 
-    private void removeGrid(WorldPoint center)
+    private void removePreset(WorldPoint center)
     {
-        cancelGridMode();
-        if (!isHost() || gameId == null) return;
+        FieldPreset preset = selectedPreset;
+        int rotationSteps = presetRotationSteps;
+        cancelPresetMode();
+        if (!isHost() || gameId == null || preset == null) return;
 
-        int startX = center.getX() - gridWidth / 2;
-        int startY = center.getY() - gridHeight / 2;
-        int endX = startX + gridWidth - 1;
-        int endY = startY + gridHeight - 1;
-        int plane = center.getPlane();
+        // Clear every type at each covered position (not just the preset's own declared type) —
+        // e.g. removing a FIELD-only Custom Grid should also strip any ZONE_A/ZONE_B a host
+        // placed on top of it, matching "wipe this footprint clean" rather than "surgically undo
+        // only what this exact preset would have placed." Dedup positions since a tile can carry
+        // more than one type (e.g. Standard Field's FIELD+ZONE_A coexisting).
+        Set<WorldPoint> uniquePoints = new HashSet<>();
+        for (FieldPreset.PlacedTile pt : preset.layout(center, rotationSteps)) uniquePoints.add(pt.point);
 
         executor.submit(() ->
         {
-            try
+            for (WorldPoint wp : uniquePoints)
             {
-                for (int x = startX; x <= endX; x++)
-                {
-                    apiClient.unmarkTile(gameId, writeKey, x, startY, plane, "BOUNDARY_S");
-                    apiClient.unmarkTile(gameId, writeKey, x, endY, plane, "BOUNDARY_N");
-                }
-                for (int y = startY; y <= endY; y++)
-                {
-                    apiClient.unmarkTile(gameId, writeKey, startX, y, plane, "BOUNDARY_W");
-                    apiClient.unmarkTile(gameId, writeKey, endX, y, plane, "BOUNDARY_E");
-                }
+                try { apiClient.unmarkTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), null); }
+                catch (Exception ex) { log.warn("Remove preset tile failed at {},{}: {}", wp.getX(), wp.getY(), ex.getMessage()); }
             }
-            catch (Exception ex) { log.warn("Remove grid failed: {}", ex.getMessage()); }
         });
     }
 
@@ -687,21 +683,17 @@ public class GnomeballPlugin extends Plugin
         }
 
         subMenu.createMenuEntry(-1)
-            .setOption("Boundary W")
+            .setOption("<col=" + COLOR_TEAM_A + ">Zone A</col>")
             .setTarget("").setType(MenuAction.RUNELITE)
-            .onClick(me -> toggleTile(wp, "BOUNDARY_W"));
+            .onClick(me -> toggleTile(wp, "ZONE_A"));
         subMenu.createMenuEntry(-1)
-            .setOption("Boundary S")
+            .setOption("<col=" + COLOR_TEAM_B + ">Zone B</col>")
             .setTarget("").setType(MenuAction.RUNELITE)
-            .onClick(me -> toggleTile(wp, "BOUNDARY_S"));
+            .onClick(me -> toggleTile(wp, "ZONE_B"));
         subMenu.createMenuEntry(-1)
-            .setOption("Boundary E")
+            .setOption("Field")
             .setTarget("").setType(MenuAction.RUNELITE)
-            .onClick(me -> toggleTile(wp, "BOUNDARY_E"));
-        subMenu.createMenuEntry(-1)
-            .setOption("Boundary N")
-            .setTarget("").setType(MenuAction.RUNELITE)
-            .onClick(me -> toggleTile(wp, "BOUNDARY_N"));
+            .onClick(me -> toggleTile(wp, "FIELD"));
         subMenu.createMenuEntry(-1)
             .setOption("Standard")
             .setTarget("").setType(MenuAction.RUNELITE)
@@ -955,7 +947,7 @@ public class GnomeballPlugin extends Plugin
             case "PLAYER_JOINED":
             case "ROLE_ASSIGNED":
             case "PLAYER_LEFT":
-                refreshRosterNow();
+                requestRosterRefresh();
                 break;
         }
 
@@ -978,7 +970,7 @@ public class GnomeballPlugin extends Plugin
         String label = (taggerNumber != null && !taggerNumber.isEmpty()) ? tagger + " (" + taggerNumber + ")" : tagger;
         String colorHex = roleColorHex(rosterReducer.getRole(tagger));
         if (colorHex != null) label = "<col=" + colorHex + ">" + label + "</col>";
-        client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", "You've been tagged! You must pass the Gnomeball to " + label + ".", null);
+        addChatMessage("You've been tagged! You must pass the Gnomeball to " + label + ".");
     }
 
     private static String roleColorHex(GnomeballRole role)
@@ -1005,8 +997,28 @@ public class GnomeballPlugin extends Plugin
         }
     }
 
+    /** Throttled entry point for roster refreshes triggered by roster-affecting events — prefer
+     * this over calling {@link #refreshRosterNow()} directly from an event handler. Fetches
+     * immediately if the throttle window has elapsed since the last fetch; otherwise schedules a
+     * single trailing fetch for when the window does elapse (a repeat call while one's already
+     * pending is a no-op), so a burst of join/leave/role events collapses into at most two
+     * roster fetches total instead of one per event. */
+    private void requestRosterRefresh()
+    {
+        long elapsed = System.currentTimeMillis() - lastRosterFetchMs;
+        if (elapsed >= ROSTER_REFRESH_THROTTLE_MS)
+        {
+            refreshRosterNow();
+            return;
+        }
+        if (pendingRosterRefresh != null && !pendingRosterRefresh.isDone()) return;
+        pendingRosterRefresh = heartbeatScheduler.schedule(
+            this::refreshRosterNow, ROSTER_REFRESH_THROTTLE_MS - elapsed, TimeUnit.MILLISECONDS);
+    }
+
     private void refreshRosterNow()
     {
+        lastRosterFetchMs = System.currentTimeMillis();
         final String gid = gameId;
         if (gid == null) return;
         executor.submit(() ->
@@ -1223,6 +1235,34 @@ public class GnomeballPlugin extends Plugin
         });
     }
 
+    /** Removes every currently marked field/zone tile. A tile can carry more than one type at once
+     * (e.g. a STANDARD tile a host manually overlaid on a FIELD tile), so this unmarks by unique
+     * (x,y,plane) with a null tileType, which the server treats as "remove everything here" —
+     * one call per tile instead of one per (tile, type). */
+    public void onClearArenaClicked()
+    {
+        if (!isHost() || gameId == null) return;
+        List<TileReducer.TileEntry> snapshot = tileReducer.snapshot();
+        if (snapshot.isEmpty())
+        {
+            addChatMessage("No field tiles to clear.");
+            return;
+        }
+
+        Set<WorldPoint> uniquePoints = new HashSet<>();
+        for (TileReducer.TileEntry e : snapshot) uniquePoints.add(e.point);
+
+        executor.submit(() ->
+        {
+            for (WorldPoint wp : uniquePoints)
+            {
+                try { apiClient.unmarkTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), null); }
+                catch (Exception ex) { log.warn("Clear arena tile failed at {},{}: {}", wp.getX(), wp.getY(), ex.getMessage()); }
+            }
+        });
+        addChatMessage("Clearing current arena.");
+    }
+
     public void onAssignBallClicked(String playerRsn)
     {
         if (!isHost() || gameId == null) return;
@@ -1259,32 +1299,109 @@ public class GnomeballPlugin extends Plugin
     public String        getTeamBName()  { return teamBName; }
     public int           getTeamAScore() { return teamAScore; }
     public int           getTeamBScore() { return teamBScore; }
-    public boolean       isGridPlacementMode() { return gridPlacementMode; }
-    public boolean       isGridRemovalMode()   { return gridRemovalMode; }
-    public int           getGridWidth()  { return gridWidth; }
-    public int           getGridHeight() { return gridHeight; }
+    public boolean       isPresetPlacementMode() { return presetPlacementMode; }
+    public boolean       isPresetRemovalMode()   { return presetRemovalMode; }
+    public FieldPreset   getSelectedPreset()     { return selectedPreset; }
     public TileReducer   getTileReducer() { return tileReducer; }
 
-    public void startGridPlacement(int width, int height)
+    public void startPresetPlacement(FieldPreset preset)
     {
-        gridWidth = width;
-        gridHeight = height;
-        gridPlacementMode = true;
-        gridRemovalMode = false;
+        if (preset == null || preset.isEmpty()) return;
+        cancelZoneMode();
+        selectedPreset = preset;
+        presetPlacementMode = true;
+        presetRemovalMode = false;
+        presetRotationSteps = 0;
     }
 
-    public void startGridRemoval(int width, int height)
+    public void startPresetRemoval(FieldPreset preset)
     {
-        gridWidth = width;
-        gridHeight = height;
-        gridRemovalMode = true;
-        gridPlacementMode = false;
+        if (preset == null || preset.isEmpty()) return;
+        cancelZoneMode();
+        selectedPreset = preset;
+        presetRemovalMode = true;
+        presetPlacementMode = false;
+        presetRotationSteps = 0;
     }
 
-    public void cancelGridMode()
+    public void cancelPresetMode()
     {
-        gridPlacementMode = false;
-        gridRemovalMode = false;
+        presetPlacementMode = false;
+        presetRemovalMode = false;
+        selectedPreset = null;
+        presetRotationSteps = 0;
+    }
+
+    public int getPresetRotationSteps() { return presetRotationSteps; }
+
+    public void rotatePresetNext()
+    {
+        presetRotationSteps = (presetRotationSteps + 1) % 4;
+    }
+
+    public static int getCustomSlotCount() { return CUSTOM_SLOT_COUNT; }
+
+    public FieldPreset getCustomSlot(int index)
+    {
+        return (index >= 0 && index < CUSTOM_SLOT_COUNT) ? customSlots[index] : null;
+    }
+
+    public void saveCurrentFieldToCustomSlot(int index)
+    {
+        if (index < 0 || index >= CUSTOM_SLOT_COUNT) return;
+        List<TileReducer.TileEntry> snapshot = tileReducer.snapshot();
+        if (snapshot.isEmpty())
+        {
+            addChatMessage("No field tiles to save.");
+            return;
+        }
+        boolean wasEmpty = customSlots[index] == null;
+        customSlots[index] = FieldPreset.fromTiles("Custom Slot " + (index + 1), snapshot);
+        persistCustomFieldSlots();
+        String message = wasEmpty
+            ? "Custom Slot " + (index + 1) + " renamed — no longer empty."
+            : "Saved current field to Custom Slot " + (index + 1) + ".";
+        addChatMessage(message);
+        SwingUtilities.invokeLater(() -> panel.refresh());
+    }
+
+    /** Queues a game chat message on the client thread. Safe to call from any thread (e.g. a
+     * Swing button listener on the EDT) — RuneLite's Client asserts client-thread ownership for
+     * any call that touches game state, addChatMessage included. */
+    private void addChatMessage(String message)
+    {
+        clientThread.invokeLater(() -> client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", message, null));
+    }
+
+    private void loadCustomFieldSlots()
+    {
+        try
+        {
+            String json = configManager.getConfiguration(CONFIG_GROUP, KEY_CUSTOM_FIELD_SLOTS);
+            if (json == null || json.isBlank()) return;
+            Type type = new TypeToken<List<List<FieldPreset.RelativeTile>>>() {}.getType();
+            List<List<FieldPreset.RelativeTile>> raw = gson.fromJson(json, type);
+            if (raw == null) return;
+            for (int i = 0; i < Math.min(raw.size(), CUSTOM_SLOT_COUNT); i++)
+            {
+                List<FieldPreset.RelativeTile> tiles = raw.get(i);
+                if (tiles != null && !tiles.isEmpty())
+                {
+                    customSlots[i] = new FieldPreset("Custom Slot " + (i + 1), tiles);
+                }
+            }
+        }
+        catch (Exception ex) { log.warn("Failed to load custom field slots: {}", ex.getMessage()); }
+    }
+
+    private void persistCustomFieldSlots()
+    {
+        List<List<FieldPreset.RelativeTile>> raw = new ArrayList<>();
+        for (FieldPreset preset : customSlots)
+        {
+            raw.add(preset != null ? preset.tiles : List.of());
+        }
+        configManager.setConfiguration(CONFIG_GROUP, KEY_CUSTOM_FIELD_SLOTS, gson.toJson(raw));
     }
 
     public String        getZoneTeam()     { return zoneTeam; }
@@ -1376,7 +1493,7 @@ public class GnomeballPlugin extends Plugin
 
     public void startZoneMode(String team)
     {
-        cancelGridMode();
+        cancelPresetMode();
         zoneTeam = team;
         zoneTiles.clear();
     }
@@ -1485,6 +1602,7 @@ public class GnomeballPlugin extends Plugin
     {
         if (heartbeatFuture != null)   { heartbeatFuture.cancel(false);   heartbeatFuture = null; }
         if (onlineRefreshFuture != null) { onlineRefreshFuture.cancel(false); onlineRefreshFuture = null; }
+        if (pendingRosterRefresh != null) { pendingRosterRefresh.cancel(false); pendingRosterRefresh = null; }
     }
 
     // -------------------------------------------------------------------------

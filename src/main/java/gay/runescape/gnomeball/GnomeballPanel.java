@@ -50,14 +50,23 @@ public class GnomeballPanel extends PluginPanel
     // Host controls (grouping card — visible to host only, LOBBY or ACTIVE)
     private final JPanel hostControlsCard = new JPanel();
 
-    // Grid placement (host; shown whenever the host card is shown)
-    private final JPanel gridPanel = new JPanel();
+    // Field Presets — unified placement workflow (host; shown whenever the host card is shown).
+    // Covers both a host-dimensioned "Custom Grid" and named presets/saved slots through one
+    // dropdown + Place/Remove/Save, rather than a separate grid-specific tool.
+    private final JPanel presetPanel = new JPanel();
+    private final JComboBox<String> presetDropdown = new JComboBox<>();
+    private final JPanel gridSizeRow = new JPanel();
     private final JSpinner gridWidthSpinner  = new JSpinner(new SpinnerNumberModel(5, 1, 50, 1));
     private final JSpinner gridHeightSpinner = new JSpinner(new SpinnerNumberModel(5, 1, 50, 1));
-    private final JButton placeGridBtn  = new JButton("Place Grid");
-    private final JButton removeGridBtn = new JButton("Remove Grid");
+    private final JButton placePresetBtn = new JButton("Place");
+    private final JButton removePresetBtn = new JButton("Remove");
+    private final JButton saveFieldBtn = new JButton("Save");
+
+    // Zones (host; shown whenever the host card is shown)
+    private final JPanel zonePanel = new JPanel();
     private final JButton zoneABtn = new JButton("Team A Zone");
     private final JButton zoneBBtn = new JButton("Team B Zone");
+    private final JButton clearArenaBtn = new JButton("Clear Current Arena");
 
     // Host pre-start (LOBBY only, within host card)
     private final JPanel hostPreStartPanel = new JPanel();
@@ -322,69 +331,122 @@ public class GnomeballPanel extends PluginPanel
         hostControlsCard.add(hostCardTitle);
         hostControlsCard.add(Box.createVerticalStrut(6));
 
-        // Field (grid/zone placement) — shown whenever the host card is shown
-        JLabel gridTitle = new JLabel("Field");
-        gridTitle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-        gridTitle.setFont(FontManager.getRunescapeSmallFont());
-        gridTitle.setAlignmentX(LEFT_ALIGNMENT);
+        // Field Presets — one unified workflow for laying out the field, shown whenever the host
+        // card is shown. "Custom Grid" (host-dimensioned, via the spinners below) sits in the same
+        // dropdown as named presets/saved slots — picking any of them and hitting Place/Remove
+        // drives the exact same click-to-place pipeline, so there's only ever one Place button.
+        JLabel presetTitle = new JLabel("Field Presets");
+        presetTitle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        presetTitle.setFont(FontManager.getRunescapeSmallFont());
+        presetTitle.setAlignmentX(LEFT_ALIGNMENT);
 
-        gridPanel.setLayout(new BoxLayout(gridPanel, BoxLayout.Y_AXIS));
-        gridPanel.setBackground(new Color(34, 30, 26));
-        gridPanel.setAlignmentX(LEFT_ALIGNMENT);
+        presetPanel.setLayout(new BoxLayout(presetPanel, BoxLayout.Y_AXIS));
+        presetPanel.setBackground(new Color(34, 30, 26));
+        presetPanel.setAlignmentX(LEFT_ALIGNMENT);
 
-        JPanel gridSizeRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        presetDropdown.setAlignmentX(LEFT_ALIGNMENT);
+        presetDropdown.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        presetDropdown.addActionListener(e -> refreshGridButton());
+        refreshPresetDropdownItems();
+        presetPanel.add(presetDropdown);
+        presetPanel.add(Box.createVerticalStrut(4));
+
+        // Only relevant (and only shown) while "Custom Grid" is selected
+        gridSizeRow.setLayout(new FlowLayout(FlowLayout.LEFT, 4, 0));
         gridSizeRow.setBackground(new Color(34, 30, 26));
         gridSizeRow.setAlignmentX(LEFT_ALIGNMENT);
         JLabel wLabel = new JLabel("W:");
         wLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         gridSizeRow.add(wLabel);
         gridWidthSpinner.setPreferredSize(new Dimension(50, 24));
+        gridWidthSpinner.addChangeListener(e -> refreshGridButton());
         gridSizeRow.add(gridWidthSpinner);
         gridSizeRow.add(Box.createHorizontalStrut(6));
         JLabel hLabel = new JLabel("H:");
         hLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
         gridSizeRow.add(hLabel);
         gridHeightSpinner.setPreferredSize(new Dimension(50, 24));
+        gridHeightSpinner.addChangeListener(e -> refreshGridButton());
         gridSizeRow.add(gridHeightSpinner);
-        gridPanel.add(gridSizeRow);
-        gridPanel.add(Box.createVerticalStrut(4));
+        presetPanel.add(gridSizeRow);
+        presetPanel.add(Box.createVerticalStrut(4));
 
-        JPanel gridBtnRow = new JPanel(new GridLayout(1, 2, 4, 0));
-        gridBtnRow.setBackground(new Color(34, 30, 26));
-        gridBtnRow.setAlignmentX(LEFT_ALIGNMENT);
-        gridBtnRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        JPanel presetBtnRow = new JPanel(new GridLayout(1, 2, 4, 0));
+        presetBtnRow.setBackground(new Color(34, 30, 26));
+        presetBtnRow.setAlignmentX(LEFT_ALIGNMENT);
+        presetBtnRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
 
-        placeGridBtn.addActionListener(e ->
+        placePresetBtn.addActionListener(e ->
         {
-            if (plugin.isGridPlacementMode())
+            if (plugin.isPresetPlacementMode())
             {
-                plugin.cancelGridMode();
+                plugin.cancelPresetMode();
             }
             else
             {
-                plugin.startGridPlacement((Integer) gridWidthSpinner.getValue(), (Integer) gridHeightSpinner.getValue());
+                FieldPreset resolved = resolveSelectedPreset();
+                if (resolved == null || resolved.isEmpty()) return;
+                plugin.startPresetPlacement(resolved);
             }
             refreshGridButton();
         });
+        presetBtnRow.add(placePresetBtn);
 
-        removeGridBtn.setForeground(new Color(220, 60, 60));
-        removeGridBtn.addActionListener(e ->
+        removePresetBtn.setForeground(new Color(220, 60, 60));
+        removePresetBtn.addActionListener(e ->
         {
-            if (plugin.isGridRemovalMode())
+            if (plugin.isPresetRemovalMode())
             {
-                plugin.cancelGridMode();
+                plugin.cancelPresetMode();
             }
             else
             {
-                plugin.startGridRemoval((Integer) gridWidthSpinner.getValue(), (Integer) gridHeightSpinner.getValue());
+                FieldPreset resolved = resolveSelectedPreset();
+                if (resolved == null || resolved.isEmpty()) return;
+                plugin.startPresetRemoval(resolved);
             }
             refreshGridButton();
         });
+        presetBtnRow.add(removePresetBtn);
 
-        gridBtnRow.add(placeGridBtn);
-        gridBtnRow.add(removeGridBtn);
-        gridPanel.add(gridBtnRow);
-        gridPanel.add(Box.createVerticalStrut(4));
+        presetPanel.add(presetBtnRow);
+        presetPanel.add(Box.createVerticalStrut(4));
+
+        saveFieldBtn.setAlignmentX(LEFT_ALIGNMENT);
+        saveFieldBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        saveFieldBtn.addActionListener(e ->
+        {
+            int slotIndex = resolveSelectedCustomSlotIndex();
+            if (slotIndex < 0) return;
+            if (plugin.getCustomSlot(slotIndex) != null)
+            {
+                int choice = JOptionPane.showConfirmDialog(this,
+                    "Overwrite Custom Slot " + (slotIndex + 1) + " with the current field?",
+                    "Overwrite Saved Field", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                if (choice != JOptionPane.YES_OPTION) return;
+            }
+            plugin.saveCurrentFieldToCustomSlot(slotIndex);
+            refreshPresetDropdownItems();
+            refreshGridButton();
+        });
+        presetPanel.add(saveFieldBtn);
+
+        hostControlsCard.add(presetTitle);
+        hostControlsCard.add(Box.createVerticalStrut(4));
+        hostControlsCard.add(presetPanel);
+        hostControlsCard.add(Box.createVerticalStrut(8));
+
+        // Zones — shown whenever the host card is shown. Kept separate from Field Presets since
+        // zones are marked tile-by-tile per team rather than "placed" as a shape, and a
+        // Custom-Grid field has no endzones of its own, so this is how those get added.
+        JLabel zoneTitle = new JLabel("Zones");
+        zoneTitle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        zoneTitle.setFont(FontManager.getRunescapeSmallFont());
+        zoneTitle.setAlignmentX(LEFT_ALIGNMENT);
+
+        zonePanel.setLayout(new BoxLayout(zonePanel, BoxLayout.Y_AXIS));
+        zonePanel.setBackground(new Color(34, 30, 26));
+        zonePanel.setAlignmentX(LEFT_ALIGNMENT);
 
         JPanel zoneBtnRow = new JPanel(new GridLayout(1, 2, 4, 0));
         zoneBtnRow.setBackground(new Color(34, 30, 26));
@@ -413,11 +475,27 @@ public class GnomeballPanel extends PluginPanel
 
         zoneBtnRow.add(zoneABtn);
         zoneBtnRow.add(zoneBBtn);
-        gridPanel.add(zoneBtnRow);
+        zonePanel.add(zoneBtnRow);
 
-        hostControlsCard.add(gridTitle);
+        hostControlsCard.add(zoneTitle);
         hostControlsCard.add(Box.createVerticalStrut(4));
-        hostControlsCard.add(gridPanel);
+        hostControlsCard.add(zonePanel);
+        hostControlsCard.add(Box.createVerticalStrut(8));
+
+        // Clears everything from both Field Presets and Zones — applies to the whole arena, so
+        // it lives below both rather than inside either sub-tool.
+        clearArenaBtn.setForeground(new Color(220, 60, 60));
+        clearArenaBtn.setAlignmentX(LEFT_ALIGNMENT);
+        clearArenaBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        clearArenaBtn.addActionListener(e ->
+        {
+            int choice = JOptionPane.showConfirmDialog(this,
+                "Remove all field and zone tiles for this game?",
+                "Clear Current Arena", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (choice != JOptionPane.YES_OPTION) return;
+            plugin.onClearArenaClicked();
+        });
+        hostControlsCard.add(clearArenaBtn);
         hostControlsCard.add(Box.createVerticalStrut(8));
 
         // Setup sub-group (LOBBY only): duration + start
@@ -692,15 +770,78 @@ public class GnomeballPanel extends PluginPanel
     // Helpers
     // -------------------------------------------------------------------------
 
+    private static final int CUSTOM_GRID_INDEX = 0;
+
     private void refreshGridButton()
     {
-        placeGridBtn.setText(plugin.isGridPlacementMode() ? "Cancel" : "Place");
-        removeGridBtn.setText(plugin.isGridRemovalMode() ? "Cancel" : "Remove");
+        gridSizeRow.setVisible(presetDropdown.getSelectedIndex() == CUSTOM_GRID_INDEX);
 
         boolean inZoneA = plugin.isZoneMode() && "TEAM_A".equals(plugin.getZoneTeam());
         boolean inZoneB = plugin.isZoneMode() && "TEAM_B".equals(plugin.getZoneTeam());
-        zoneABtn.setText(inZoneA ? "Cancel" : plugin.getTeamAName() + " Zone");
-        zoneBBtn.setText(inZoneB ? "Cancel" : plugin.getTeamBName() + " Zone");
+        zoneABtn.setText(inZoneA ? "Cancel" : "Team A Zone");
+        zoneBBtn.setText(inZoneB ? "Cancel" : "Team B Zone");
+
+        FieldPreset resolved = resolveSelectedPreset();
+        boolean hasValidSelection = resolved != null && !resolved.isEmpty();
+
+        placePresetBtn.setText(plugin.isPresetPlacementMode() ? "Cancel" : "Place");
+        placePresetBtn.setEnabled(plugin.isPresetPlacementMode() || hasValidSelection);
+
+        removePresetBtn.setText(plugin.isPresetRemovalMode() ? "Cancel" : "Remove");
+        removePresetBtn.setEnabled(plugin.isPresetRemovalMode() || hasValidSelection);
+
+        boolean hasFieldTiles = !plugin.getTileReducer().snapshot().isEmpty();
+        int slotIndex = resolveSelectedCustomSlotIndex();
+        saveFieldBtn.setEnabled(slotIndex >= 0 && hasFieldTiles);
+        clearArenaBtn.setEnabled(hasFieldTiles);
+    }
+
+    /** Rebuilds the preset dropdown's item labels ("Custom Grid" + built-ins + custom slots,
+     * "(empty)" suffix for unpopulated slots) while preserving the current selection. Called
+     * only right after a Save action and once at construction — not from refresh(), to avoid
+     * disrupting an open dropdown mid-interaction. */
+    private void refreshPresetDropdownItems()
+    {
+        int selectedIndex = presetDropdown.getSelectedIndex();
+        presetDropdown.removeAllItems();
+        presetDropdown.addItem("Custom Grid");
+        for (FieldPreset preset : FieldPreset.ALL) presetDropdown.addItem(preset.name);
+        for (int i = 0; i < GnomeballPlugin.getCustomSlotCount(); i++)
+        {
+            FieldPreset slot = plugin.getCustomSlot(i);
+            presetDropdown.addItem(slot != null ? slot.name : "Custom Slot " + (i + 1) + " (empty)");
+        }
+        presetDropdown.setSelectedIndex(Math.max(selectedIndex, 0));
+    }
+
+    /** Resolves the dropdown's current selection to a placeable preset. "Custom Grid" is
+     * generated fresh from the current spinner values every call — cheap, and keeps it always
+     * in sync without needing to rebuild the dropdown when the spinners change. Returns null only
+     * if an empty custom slot is selected. */
+    private FieldPreset resolveSelectedPreset()
+    {
+        int idx = presetDropdown.getSelectedIndex();
+        // -1 = no selection, which happens transiently while refreshPresetDropdownItems() clears
+        // the combo box (removeAllItems() fires the selection listener synchronously mid-rebuild).
+        if (idx < 0) return null;
+        if (idx == CUSTOM_GRID_INDEX)
+        {
+            return FieldPreset.customGrid((Integer) gridWidthSpinner.getValue(), (Integer) gridHeightSpinner.getValue());
+        }
+        int builtInCount = FieldPreset.ALL.size();
+        if (idx <= builtInCount) return FieldPreset.ALL.get(idx - 1);
+        return plugin.getCustomSlot(idx - builtInCount - 1);
+    }
+
+    /** Resolves the dropdown's current selection to a custom-slot index (0-based), or -1 if
+     * "Custom Grid" or a built-in preset is selected. Populated vs. empty is not distinguished
+     * here — Save should be offered for either, since saving IS what populates an empty slot. */
+    private int resolveSelectedCustomSlotIndex()
+    {
+        int idx = presetDropdown.getSelectedIndex();
+        int builtInCount = FieldPreset.ALL.size();
+        int slotIndex = idx - builtInCount - 1;
+        return (slotIndex >= 0 && slotIndex < GnomeballPlugin.getCustomSlotCount()) ? slotIndex : -1;
     }
 
     private void commitTeamName(String team, String name)

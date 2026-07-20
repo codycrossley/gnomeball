@@ -9,12 +9,30 @@ import net.runelite.client.ui.overlay.*;
 
 import java.awt.*;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class TileOverlay extends Overlay
 {
-    private static final Color COLOR_DEFAULT = new Color(255, 255, 0, 200);
+    private static final Color COLOR_STANDARD = new Color(255, 255, 0);
+    private static final Color COLOR_FIELD    = new Color(255, 255, 255);
+    private static final Color COLOR_ZONE_A   = new Color(60, 120, 220);
+    private static final Color COLOR_ZONE_B   = new Color(200, 60, 60);
+
+    /** Types whose committed tiles render as a connected-region outline (edges only), rather than
+     * each tile individually filled — these tend to cover large areas, and filling every tile
+     * solid reads as an overwhelming wash of color. STANDARD is excluded: it's meant for sparse
+     * individual markers, where a filled single tile is the clearer signal. Order matters: drawn
+     * in this sequence, so a zone edge coinciding with a field edge (e.g. a zone tile sitting
+     * right at the field's outer boundary) draws on top and wins — zones take rendering priority
+     * over the field they sit on. */
+    private static final List<String> OUTLINE_TYPES = List.of("FIELD", "ZONE_A", "ZONE_B");
+
+    private static final Stroke SOLID_STROKE   = new BasicStroke(2f);
+    private static final Stroke PREVIEW_STROKE = new BasicStroke(2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, new float[]{6f, 4f}, 0f);
 
     private final Client client;
     private final GnomeballConfig config;
@@ -41,108 +59,45 @@ public class TileOverlay extends Overlay
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-        List<TileReducer.TileEntry> entries = tileReducer.snapshot();
-        for (TileReducer.TileEntry entry : entries)
-        {
-            if ("STANDARD".equals(entry.tileType))
-            {
-                renderStandard(g, entry);
-            }
-            else if (entry.tileType != null && entry.tileType.startsWith("BOUNDARY_"))
-            {
-                renderBoundaryEdge(g, entry);
-            }
-        }
-
-        if (plugin.isGridPlacementMode())
-        {
-            renderGridPreview(g, new Color(255, 255, 255, 160));
-        }
-        else if (plugin.isGridRemovalMode())
-        {
-            renderGridPreview(g, new Color(255, 60, 60, 160));
-        }
+        renderCommittedTiles(g);
 
         if (plugin.isZoneMode())
         {
             renderZonePreview(g);
         }
 
+        if (plugin.isPresetPlacementMode() || plugin.isPresetRemovalMode())
+        {
+            renderPresetPreview(g);
+        }
+
         return null;
     }
 
-    private void renderStandard(Graphics2D g, TileReducer.TileEntry entry)
+    private void renderCommittedTiles(Graphics2D g)
     {
-        Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), entry.point);
-        for (WorldPoint local : localPoints)
+        List<TileReducer.TileEntry> entries = tileReducer.snapshot();
+
+        for (TileReducer.TileEntry entry : entries)
         {
-            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
-            if (lp == null) continue;
-
-            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
-            if (poly == null) continue;
-
-            Color base = resolveColor(entry.color);
-            g.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 60));
-            g.fillPolygon(poly);
-            g.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 200));
-            g.setStroke(new BasicStroke(1f));
-            g.drawPolygon(poly);
+            if (OUTLINE_TYPES.contains(entry.tileType)) continue;
+            Color base = resolveColor(entry.color, entry.tileType);
+            renderFilledTile(g, entry.point, withAlpha(base, 60), withAlpha(base, 200), SOLID_STROKE);
         }
-    }
 
-    private void renderBoundaryEdge(Graphics2D g, TileReducer.TileEntry entry)
-    {
-        Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), entry.point);
-        for (WorldPoint local : localPoints)
+        Map<String, Set<WorldPoint>> byType = new HashMap<>();
+        for (String type : OUTLINE_TYPES) byType.put(type, new HashSet<>());
+        for (TileReducer.TileEntry entry : entries)
         {
-            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
-            if (lp == null) continue;
-
-            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
-            if (poly == null || poly.npoints < 4) continue;
-
-            Color base = resolveColor(entry.color);
-            g.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 220));
-            g.setStroke(new BasicStroke(3f));
-
-            // Tile polygon vertices: 0=W, 1=N, 2=E, 3=S (RuneLite convention)
-            int edgeIndex = edgeIndex(entry.tileType);
-            if (edgeIndex < 0) return;
-
-            int i1 = edgeIndex;
-            int i2 = (edgeIndex + 1) % 4;
-            g.drawLine(poly.xpoints[i1], poly.ypoints[i1], poly.xpoints[i2], poly.ypoints[i2]);
+            Set<WorldPoint> set = byType.get(entry.tileType);
+            if (set != null) set.add(entry.point);
         }
-    }
 
-    private void renderGridPreview(Graphics2D g, Color previewColor)
-    {
-        Tile hovered = client.getTopLevelWorldView().getSelectedSceneTile();
-        if (hovered == null) return;
-        WorldPoint center = hovered.getWorldLocation();
-        if (center == null) return;
-
-        int w = plugin.getGridWidth();
-        int h = plugin.getGridHeight();
-        int startX = center.getX() - w / 2;
-        int startY = center.getY() - h / 2;
-        int endX = startX + w - 1;
-        int endY = startY + h - 1;
-        int plane = center.getPlane();
-
-        g.setColor(previewColor);
-        g.setStroke(new BasicStroke(2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, new float[]{6f, 4f}, 0f));
-
-        for (int x = startX; x <= endX; x++)
+        for (String type : OUTLINE_TYPES)
         {
-            drawEdgeAt(g, x, startY, plane, "BOUNDARY_S");
-            drawEdgeAt(g, x, endY, plane, "BOUNDARY_N");
-        }
-        for (int y = startY; y <= endY; y++)
-        {
-            drawEdgeAt(g, startX, y, plane, "BOUNDARY_W");
-            drawEdgeAt(g, endX, y, plane, "BOUNDARY_E");
+            Set<WorldPoint> tiles = byType.get(type);
+            if (tiles.isEmpty()) continue;
+            renderOutline(g, tiles, connectivityFor(type, byType), withAlpha(defaultColorFor(type), 220), SOLID_STROKE);
         }
     }
 
@@ -151,44 +106,101 @@ public class TileOverlay extends Overlay
         Set<WorldPoint> tiles = plugin.getZoneTiles();
         if (tiles.isEmpty()) return;
 
-        Color base = "TEAM_A".equals(plugin.getZoneTeam())
-            ? new Color(60, 120, 220)
-            : new Color(200, 60, 60);
-        Color fill = new Color(base.getRed(), base.getGreen(), base.getBlue(), 50);
-        Color edge = new Color(base.getRed(), base.getGreen(), base.getBlue(), 200);
+        Color base = "TEAM_A".equals(plugin.getZoneTeam()) ? COLOR_ZONE_A : COLOR_ZONE_B;
+        renderOutline(g, tiles, tiles, withAlpha(base, 220), PREVIEW_STROKE);
+    }
 
-        for (WorldPoint wp : tiles)
+    private void renderPresetPreview(Graphics2D g)
+    {
+        FieldPreset preset = plugin.getSelectedPreset();
+        if (preset == null) return;
+        boolean removal = plugin.isPresetRemovalMode();
+
+        Tile hovered = client.getTopLevelWorldView().getSelectedSceneTile();
+        if (hovered == null) return;
+        WorldPoint center = hovered.getWorldLocation();
+        if (center == null) return;
+
+        List<FieldPreset.PlacedTile> placed = preset.layout(center, plugin.getPresetRotationSteps());
+
+        // Non-outline types (e.g. a saved custom slot can include STANDARD tiles) render
+        // individually filled, same as the committed-tile split in renderCommittedTiles.
+        for (FieldPreset.PlacedTile pt : placed)
         {
-            Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), wp);
-            for (WorldPoint local : localPoints)
-            {
-                LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
-                if (lp == null) continue;
-                Polygon poly = Perspective.getCanvasTilePoly(client, lp);
-                if (poly == null) continue;
-
-                g.setColor(fill);
-                g.fillPolygon(poly);
-            }
+            if (OUTLINE_TYPES.contains(pt.tileType)) continue;
+            Color base = removal ? new Color(255, 60, 60) : resolveColor(pt.color, pt.tileType);
+            renderFilledTile(g, pt.point, withAlpha(base, 50), withAlpha(base, 220), PREVIEW_STROKE);
         }
 
-        g.setColor(edge);
-        g.setStroke(new BasicStroke(3f));
-        for (WorldPoint wp : tiles)
+        Map<String, Set<WorldPoint>> byType = new HashMap<>();
+        for (FieldPreset.PlacedTile pt : placed)
         {
-            int x = wp.getX(), y = wp.getY(), plane = wp.getPlane();
-            if (!tiles.contains(new WorldPoint(x, y + 1, plane)))
-                drawEdgeAt(g, x, y, plane, "BOUNDARY_N");
-            if (!tiles.contains(new WorldPoint(x, y - 1, plane)))
-                drawEdgeAt(g, x, y, plane, "BOUNDARY_S");
-            if (!tiles.contains(new WorldPoint(x + 1, y, plane)))
-                drawEdgeAt(g, x, y, plane, "BOUNDARY_E");
-            if (!tiles.contains(new WorldPoint(x - 1, y, plane)))
-                drawEdgeAt(g, x, y, plane, "BOUNDARY_W");
+            byType.computeIfAbsent(pt.tileType, k -> new HashSet<>()).add(pt.point);
+        }
+
+        // Iterate in OUTLINE_TYPES' defined order (not the map's arbitrary entry order) so a
+        // preview draws with the same zones-over-field priority as the committed rendering.
+        for (String type : OUTLINE_TYPES)
+        {
+            Set<WorldPoint> tiles = byType.get(type);
+            if (tiles == null || tiles.isEmpty()) continue;
+            Color base = removal ? new Color(255, 60, 60) : defaultColorFor(type);
+            renderOutline(g, tiles, connectivityFor(type, byType), withAlpha(base, 220), PREVIEW_STROKE);
         }
     }
 
-    private void drawEdgeAt(Graphics2D g, int x, int y, int plane, String edgeType)
+    /** FIELD tiles treat neighboring ZONE_A/ZONE_B tiles as part of the same region — zones are
+     * conceptually part of the field, so FIELD's own outline should only appear where it meets
+     * genuinely unmarked ground, not at a zone boundary (which the zone's own strictly-same-type
+     * outline already draws). Every other type only connects to itself. */
+    private static Set<WorldPoint> connectivityFor(String type, Map<String, Set<WorldPoint>> byType)
+    {
+        if (!"FIELD".equals(type)) return byType.getOrDefault(type, Set.of());
+
+        Set<WorldPoint> connected = new HashSet<>(byType.getOrDefault("FIELD", Set.of()));
+        connected.addAll(byType.getOrDefault("ZONE_A", Set.of()));
+        connected.addAll(byType.getOrDefault("ZONE_B", Set.of()));
+        return connected;
+    }
+
+    /** Draws the outer edge of a tile region: for each tile in {@code tiles}, only the sides
+     * whose neighbor isn't in {@code connected} get a line — so a solid block renders as a single
+     * outline, not a grid of individually-outlined squares. {@code connected} is usually the same
+     * set as {@code tiles}, except FIELD, which also connects through zone tiles (see
+     * {@link #connectivityFor}) so a zone placed over/around a field doesn't leave a stray field
+     * edge showing through the zone's mass. */
+    private void renderOutline(Graphics2D g, Set<WorldPoint> tiles, Set<WorldPoint> connected, Color edgeColor, Stroke stroke)
+    {
+        for (WorldPoint wp : tiles)
+        {
+            int x = wp.getX(), y = wp.getY(), plane = wp.getPlane();
+            if (!connected.contains(new WorldPoint(x, y + 1, plane))) drawEdgeAt(g, x, y, plane, "N", edgeColor, stroke);
+            if (!connected.contains(new WorldPoint(x, y - 1, plane))) drawEdgeAt(g, x, y, plane, "S", edgeColor, stroke);
+            if (!connected.contains(new WorldPoint(x + 1, y, plane))) drawEdgeAt(g, x, y, plane, "E", edgeColor, stroke);
+            if (!connected.contains(new WorldPoint(x - 1, y, plane))) drawEdgeAt(g, x, y, plane, "W", edgeColor, stroke);
+        }
+    }
+
+    private void renderFilledTile(Graphics2D g, WorldPoint wp, Color fill, Color border, Stroke stroke)
+    {
+        Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), wp);
+        for (WorldPoint local : localPoints)
+        {
+            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
+            if (lp == null) continue;
+
+            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+            if (poly == null) continue;
+
+            g.setColor(fill);
+            g.fillPolygon(poly);
+            g.setColor(border);
+            g.setStroke(stroke);
+            g.drawPolygon(poly);
+        }
+    }
+
+    private void drawEdgeAt(Graphics2D g, int x, int y, int plane, String direction, Color color, Stroke stroke)
     {
         WorldPoint wp = new WorldPoint(x, y, plane);
         Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), wp);
@@ -200,31 +212,46 @@ public class TileOverlay extends Overlay
             Polygon poly = Perspective.getCanvasTilePoly(client, lp);
             if (poly == null || poly.npoints < 4) continue;
 
-            int idx = edgeIndex(edgeType);
+            int idx = edgeIndex(direction);
             if (idx < 0) continue;
 
-            int i1 = idx;
-            int i2 = (idx + 1) % 4;
+            int i1 = idx, i2 = (idx + 1) % 4;
+            g.setColor(color);
+            g.setStroke(stroke);
             g.drawLine(poly.xpoints[i1], poly.ypoints[i1], poly.xpoints[i2], poly.ypoints[i2]);
         }
     }
 
-    private static int edgeIndex(String tileType)
+    private static int edgeIndex(String direction)
     {
-        switch (tileType)
+        // Tile polygon vertices: 0=W, 1=N, 2=E, 3=S (RuneLite convention)
+        switch (direction)
         {
-            case "BOUNDARY_S": return 0; // W->S edge
-            case "BOUNDARY_E": return 1; // S->E edge
-            case "BOUNDARY_N": return 2; // E->N edge
-            case "BOUNDARY_W": return 3; // S->W edge
+            case "S": return 0; // W->S edge
+            case "E": return 1; // S->E edge
+            case "N": return 2; // E->N edge
+            case "W": return 3; // S->W edge
             default: return -1;
         }
     }
 
-    private static Color resolveColor(String hex)
+    private static Color withAlpha(Color c, int alpha)
     {
-        if (hex == null || hex.isBlank()) return COLOR_DEFAULT;
+        return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
+    }
+
+    private static Color defaultColorFor(String tileType)
+    {
+        if ("FIELD".equals(tileType)) return COLOR_FIELD;
+        if ("ZONE_A".equals(tileType)) return COLOR_ZONE_A;
+        if ("ZONE_B".equals(tileType)) return COLOR_ZONE_B;
+        return COLOR_STANDARD;
+    }
+
+    private static Color resolveColor(String hex, String tileType)
+    {
+        if (hex == null || hex.isBlank()) return defaultColorFor(tileType);
         try { return Color.decode(hex); }
-        catch (NumberFormatException e) { return COLOR_DEFAULT; }
+        catch (NumberFormatException e) { return defaultColorFor(tileType); }
     }
 }
