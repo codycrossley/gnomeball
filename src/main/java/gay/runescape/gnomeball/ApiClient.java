@@ -134,6 +134,18 @@ public class ApiClient
         }
     }
 
+    public void outOfBounds(String gameId, String playerRsn) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/out-of-bounds", body, null))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Out of bounds failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     public void clearBall(String gameId, String writeKey) throws IOException
     {
         try (Response resp = post("/v1/games/" + gameId + "/clear-ball", new JsonObject(), writeKey))
@@ -432,6 +444,7 @@ public class ApiClient
         public Boolean obligationActive;
         public String obligationTeam;
         public String obligationScorer;
+        public String obligationKind;
         public List<RosterPlayerOut> players;
     }
 

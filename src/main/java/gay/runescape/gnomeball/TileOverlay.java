@@ -21,6 +21,8 @@ public class TileOverlay extends Overlay
     private static final Color COLOR_FIELD    = new Color(255, 255, 255);
     private static final Color COLOR_ZONE_A   = new Color(60, 120, 220);
     private static final Color COLOR_ZONE_B   = new Color(200, 60, 60);
+    private static final Color COLOR_OUT_OF_BOUNDS_FLASH = new Color(255, 210, 0);
+    private static final long  OUT_OF_BOUNDS_PULSE_PERIOD_MS = 260;
 
     /** Types whose committed tiles render as a connected-region outline (edges only), rather than
      * each tile individually filled — these tend to cover large areas, and filling every tile
@@ -33,6 +35,7 @@ public class TileOverlay extends Overlay
 
     private static final Stroke SOLID_STROKE   = new BasicStroke(2f);
     private static final Stroke PREVIEW_STROKE = new BasicStroke(2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, new float[]{6f, 4f}, 0f);
+    private static final Stroke FLASH_STROKE   = new BasicStroke(3.5f);
 
     private final Client client;
     private final GnomeballConfig config;
@@ -93,12 +96,32 @@ public class TileOverlay extends Overlay
             if (set != null) set.add(entry.point);
         }
 
+        Color oobFlash = resolveOutOfBoundsFlashColor();
+
         for (String type : OUTLINE_TYPES)
         {
             Set<WorldPoint> tiles = byType.get(type);
             if (tiles.isEmpty()) continue;
-            renderOutline(g, tiles, connectivityFor(type, byType), withAlpha(defaultColorFor(type), 220), SOLID_STROKE);
+            Color edgeColor = oobFlash != null ? oobFlash : withAlpha(defaultColorFor(type), 220);
+            Stroke stroke = oobFlash != null ? FLASH_STROKE : SOLID_STROKE;
+            renderOutline(g, tiles, connectivityFor(type, byType), edgeColor, stroke);
         }
+    }
+
+    /** Returns a pulsing red to override every field/zone outline while a player was just ruled
+     * out of bounds, or null if no such flash is currently active (normal per-type colors apply).
+     * Pulses continuously off {@code until - now} rather than tracking a separate start time, so
+     * it needs no extra state beyond the single deadline the plugin already exposes. */
+    private Color resolveOutOfBoundsFlashColor()
+    {
+        long until = plugin.getOutOfBoundsFlashUntil();
+        long now = System.currentTimeMillis();
+        if (now >= until) return null;
+
+        long phaseMs = (until - now) % OUT_OF_BOUNDS_PULSE_PERIOD_MS;
+        float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / OUT_OF_BOUNDS_PULSE_PERIOD_MS));
+        int alpha = (int) (140 + 115 * pulse);
+        return withAlpha(COLOR_OUT_OF_BOUNDS_FLASH, alpha);
     }
 
     private void renderZonePreview(Graphics2D g)

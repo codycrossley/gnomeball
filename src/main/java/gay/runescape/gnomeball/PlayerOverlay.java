@@ -15,7 +15,7 @@ public class PlayerOverlay extends Overlay
     private static final Color COLOR_BALL    = new Color(255, 210, 0);
     private static final Color COLOR_TEAM_A  = new Color(17, 104, 253);
     private static final Color COLOR_TEAM_B  = new Color(200, 60, 60);
-    private static final Color COLOR_TAG_ARROW = new Color(255, 60, 60);
+    private static final Color COLOR_TAG_ARROW = new Color(255, 210, 0);
     private static final long  TAG_ARROW_PERIOD_MS = 800;
     private static final Color COLOR_TEAM_A_OUTLINE  = new Color(17, 104, 253, 180);
     private static final Color COLOR_TEAM_B_OUTLINE  = new Color(200, 60, 60, 180);
@@ -114,23 +114,29 @@ public class PlayerOverlay extends Overlay
 
             String owedTo = plugin.getTagObligationTagger();
             boolean owedTag = owedTo != null && owedTo.equalsIgnoreCase(rsn);
-            boolean owedGoal = false;
-            if (plugin.isGoalObligationActive())
+            boolean owedDelivery = false;
+            if (plugin.isObligationActive())
             {
-                if (role == GnomeballRole.REFEREE)
+                String obligationTeam = plugin.getObligationTeam();
+                GnomeballRole opposingRole = "TEAM_A".equals(obligationTeam) ? GnomeballRole.TEAM_B : GnomeballRole.TEAM_A;
+
+                if ("OUT_OF_BOUNDS".equals(plugin.getObligationKind()))
                 {
-                    owedGoal = true;
+                    // Strictly a team-to-team turnover — a referee is never a valid target.
+                    owedDelivery = role == opposingRole;
+                }
+                else if (role == GnomeballRole.REFEREE)
+                {
+                    owedDelivery = true;
                 }
                 else if (roster.countRole(GnomeballRole.REFEREE) == 0)
                 {
                     // No referee currently in the game — fall back to highlighting the
                     // opposing team as the valid delivery target.
-                    String obligationTeam = plugin.getObligationTeam();
-                    GnomeballRole opposingRole = "TEAM_A".equals(obligationTeam) ? GnomeballRole.TEAM_B : GnomeballRole.TEAM_A;
-                    owedGoal = role == opposingRole;
+                    owedDelivery = role == opposingRole;
                 }
             }
-            if (owedTag || owedGoal)
+            if (owedTag || owedDelivery)
             {
                 drawTagArrow(g, cx, hasBall ? topY - 16 : topY);
             }
@@ -202,14 +208,14 @@ public class PlayerOverlay extends Overlay
     {
         double phase = (System.currentTimeMillis() % TAG_ARROW_PERIOD_MS) / (double) TAG_ARROW_PERIOD_MS;
         float alpha = (float) (0.4 + 0.6 * Math.abs(Math.sin(phase * Math.PI)));
-        int bob = (int) Math.round(4 * Math.sin(phase * Math.PI * 2));
+        int bob = (int) Math.round(6 * Math.sin(phase * Math.PI * 2));
 
-        int tip = tipY - 14 + bob;
-        int[] xs = { cx - 6, cx + 6, cx };
-        int[] ys = { tip - 8, tip - 8, tip };
+        int tip = tipY - 21 + bob;
+        int[] xs = { cx - 9, cx + 9, cx };
+        int[] ys = { tip - 12, tip - 12, tip };
 
         g.setColor(new Color(0, 0, 0, (int) (180 * alpha)));
-        g.fillPolygon(new int[] { xs[0] + 1, xs[1] + 1, xs[2] + 1 }, new int[] { ys[0] + 1, ys[1] + 1, ys[2] + 1 }, 3);
+        g.fillPolygon(new int[] { xs[0] + 2, xs[1] + 2, xs[2] + 2 }, new int[] { ys[0] + 2, ys[1] + 2, ys[2] + 2 }, 3);
 
         g.setColor(new Color(COLOR_TAG_ARROW.getRed(), COLOR_TAG_ARROW.getGreen(), COLOR_TAG_ARROW.getBlue(), (int) (255 * alpha)));
         g.fillPolygon(xs, ys, 3);

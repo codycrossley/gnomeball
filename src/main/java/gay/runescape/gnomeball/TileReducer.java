@@ -110,6 +110,19 @@ public class TileReducer
         return hasMarker(wp, "FIELD") || hasMarker(wp, "ZONE_A") || hasMarker(wp, "ZONE_B");
     }
 
+    /** Whether the host has marked out any field/zone tiles at all. Out-of-bounds detection
+     * needs this guard — without it, an unmarked field would mean every position counts as
+     * "outside" the (nonexistent) field, firing an out-of-bounds obligation immediately. */
+    public boolean hasFieldTiles()
+    {
+        for (TileEntry e : tiles.values())
+        {
+            String t = e.tileType;
+            if ("FIELD".equals(t) || "ZONE_A".equals(t) || "ZONE_B".equals(t)) return true;
+        }
+        return false;
+    }
+
     private static String key(int x, int y, int plane, String tileType)
     {
         return x + ":" + y + ":" + plane + ":" + tileType;

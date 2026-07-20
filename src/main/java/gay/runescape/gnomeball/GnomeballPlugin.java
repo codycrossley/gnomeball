@@ -165,11 +165,13 @@ public class GnomeballPlugin extends Plugin
     private volatile String tagObligationTagger = null;
     private volatile String tagImmunePlayer = null;
     private volatile long   tagImmuneUntil = 0;
-    private volatile boolean goalObligationActive = false;
-    private volatile String obligationTeam = null; // "TEAM_A" or "TEAM_B" — the team that scored and owes the obligation
+    private volatile boolean obligationActive = false;
+    private volatile String obligationTeam = null; // "TEAM_A" or "TEAM_B" — the team that owes the pending delivery
+    private volatile String obligationKind = null; // "GOAL" or "OUT_OF_BOUNDS" — governs who can fulfill it
     private volatile long   interceptionFlashUntil = 0;
     private volatile String interceptionPlayer     = null;
     private volatile String interceptionTeam       = null;
+    private volatile long   outOfBoundsFlashUntil  = 0;
     private volatile long goalFlashUntil = 0;
     private volatile String goalFlashTeam = null;
     private volatile int goalFlashOldScore = 0;
@@ -279,9 +281,10 @@ public class GnomeballPlugin extends Plugin
             timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0; ballHolder = null;
             tagObligationTagger = null;
             tagImmunePlayer = null; tagImmuneUntil = 0;
-            goalObligationActive = false; obligationTeam = null;
+            obligationActive = false; obligationTeam = null; obligationKind = null;
             goalFlashUntil = 0; goalFlashTeam = null; goalFlashOldScore = 0; goalFlashNewScore = 0;
             interceptionFlashUntil = 0; interceptionPlayer = null; interceptionTeam = null;
+            outOfBoundsFlashUntil = 0;
             hostMessageText = null; hostMessageFlashUntil = 0;
             if (rosterReducer != null) rosterReducer.reset();
             if (tileReducer != null) tileReducer.reset();
@@ -344,8 +347,8 @@ public class GnomeballPlugin extends Plugin
 
         if (phase != GamePhase.ACTIVE || timerPaused || ballHolder == null) return;
 
-        // Scoring is disabled until the ball is delivered to a referee
-        if (goalObligationActive) return;
+        // Scoring/turnovers are disabled until the pending obligation is fulfilled
+        if (obligationActive) return;
 
         String localRsn = localRsn();
         if (localRsn == null || !ballHolder.equalsIgnoreCase(localRsn)) return;
@@ -353,12 +356,23 @@ public class GnomeballPlugin extends Plugin
         GnomeballRole myRole = rosterReducer.getRole(localRsn);
         if (myRole != GnomeballRole.TEAM_A && myRole != GnomeballRole.TEAM_B) return;
 
-        String zoneType = myRole == GnomeballRole.TEAM_A ? "ZONE_A" : "ZONE_B";
         if (client.getLocalPlayer() == null) return;
         WorldPoint pos = client.getLocalPlayer().getWorldLocation();
-        if (!tileReducer.hasMarker(pos, zoneType)) return;
+        String scoringTeam = myRole == GnomeballRole.TEAM_A ? "TEAM_A" : "TEAM_B";
 
-        onZoneScore(myRole == GnomeballRole.TEAM_A ? "TEAM_A" : "TEAM_B");
+        String zoneType = myRole == GnomeballRole.TEAM_A ? "ZONE_A" : "ZONE_B";
+        if (tileReducer.hasMarker(pos, zoneType))
+        {
+            onZoneScore(scoringTeam);
+            return;
+        }
+
+        // Only enforced once the host has actually marked out a field — an unmarked field
+        // has no "outside" to step out of.
+        if (tileReducer.hasFieldTiles() && !tileReducer.isWithinField(pos))
+        {
+            onOutOfBounds(scoringTeam);
+        }
     }
 
     private void onZoneScore(String scoringTeam)
@@ -374,8 +388,9 @@ public class GnomeballPlugin extends Plugin
         goalFlashOldScore = oldScore;
         goalFlashNewScore = newScore;
         goalFlashUntil    = System.currentTimeMillis() + 3000;
-        goalObligationActive = true;
+        obligationActive = true;
         obligationTeam = scoringTeam;
+        obligationKind = "GOAL";
         String deliveryTarget = rosterReducer.countRole(GnomeballRole.REFEREE) == 0
             ? "a member of the opposing team"
             : "a referee";
@@ -389,6 +404,26 @@ public class GnomeballPlugin extends Plugin
         {
             try { apiClient.zoneGoal(gid, rsn); }
             catch (Exception ex) { log.warn("Zone goal failed: {}", ex.getMessage()); }
+        });
+    }
+
+    private void onOutOfBounds(String offendingTeam)
+    {
+        obligationActive = true;
+        obligationTeam = offendingTeam;
+        obligationKind = "OUT_OF_BOUNDS";
+        outOfBoundsFlashUntil = System.currentTimeMillis() + 3000;
+        String opposingTeamName = "TEAM_A".equals(offendingTeam) ? teamBName : teamAName;
+        addChatMessage("You've stepped out of bounds! Please pass the Gnomeball to " + opposingTeamName + ".");
+        SwingUtilities.invokeLater(() -> panel.refresh());
+
+        final String gid = gameId;
+        final String rsn = localRsn();
+        if (gid == null || rsn == null) return;
+        executor.submit(() ->
+        {
+            try { apiClient.outOfBounds(gid, rsn); }
+            catch (Exception ex) { log.warn("Out of bounds report failed: {}", ex.getMessage()); }
         });
     }
 
@@ -855,8 +890,19 @@ public class GnomeballPlugin extends Plugin
                     goalFlashNewScore = ++teamBScore;
                     goalFlashUntil = System.currentTimeMillis() + 3000;
                 }
-                goalObligationActive = true;
+                obligationActive = true;
                 obligationTeam = team;
+                obligationKind = "GOAL";
+                break;
+            }
+            case "OUT_OF_BOUNDS":
+            {
+                // The offending team must deliver the ball to any member of the opposing
+                // team before scoring can resume — a referee does not fulfill this one.
+                obligationActive = true;
+                obligationTeam = safeStr(e.payload, "team");
+                obligationKind = "OUT_OF_BOUNDS";
+                outOfBoundsFlashUntil = System.currentTimeMillis() + 3000;
                 break;
             }
             case "WHISTLE_BLOWN":
@@ -900,7 +946,10 @@ public class GnomeballPlugin extends Plugin
                 boolean manualAssign = safeBool(e.payload, "manual");
                 boolean fulfillsTagObligation = tagObligationTagger != null && tagObligationTagger.equalsIgnoreCase(newHolder);
 
-                if (newHolder != null && ballHolder != null && !manualAssign && !fulfillsTagObligation)
+                // While an obligation is pending, a cross-team pass is expected — it's the required
+                // delivery (opposing team fulfilling a goal with no referee, or an out-of-bounds
+                // turnover), not a steal — so it shouldn't flash as an interception.
+                if (newHolder != null && ballHolder != null && !manualAssign && !fulfillsTagObligation && !obligationActive)
                 {
                     GnomeballRole prevRole = rosterReducer.getRole(ballHolder);
                     GnomeballRole newRole  = rosterReducer.getRole(newHolder);
@@ -919,21 +968,32 @@ public class GnomeballPlugin extends Plugin
                     tagImmunePlayer = newHolder;
                     tagImmuneUntil = System.currentTimeMillis() + TAG_IMMUNITY_MS;
                 }
-                if (goalObligationActive && newHolder != null)
+                if (obligationActive && newHolder != null)
                 {
                     GnomeballRole newHolderRole = rosterReducer.getRole(newHolder);
-                    boolean fulfillsObligation = newHolderRole == GnomeballRole.REFEREE;
-                    if (!fulfillsObligation && rosterReducer.countRole(GnomeballRole.REFEREE) == 0 && obligationTeam != null)
+                    boolean fulfillsObligation;
+                    if ("OUT_OF_BOUNDS".equals(obligationKind))
                     {
-                        // No referee currently in the game — fall back to requiring delivery
-                        // to a member of the opposing team instead.
+                        // Strictly a team-to-team turnover — a referee never fulfills this one.
                         GnomeballRole opposingRole = "TEAM_A".equals(obligationTeam) ? GnomeballRole.TEAM_B : GnomeballRole.TEAM_A;
                         fulfillsObligation = newHolderRole == opposingRole;
                     }
+                    else
+                    {
+                        fulfillsObligation = newHolderRole == GnomeballRole.REFEREE;
+                        if (!fulfillsObligation && rosterReducer.countRole(GnomeballRole.REFEREE) == 0 && obligationTeam != null)
+                        {
+                            // No referee currently in the game — fall back to requiring delivery
+                            // to a member of the opposing team instead.
+                            GnomeballRole opposingRole = "TEAM_A".equals(obligationTeam) ? GnomeballRole.TEAM_B : GnomeballRole.TEAM_A;
+                            fulfillsObligation = newHolderRole == opposingRole;
+                        }
+                    }
                     if (fulfillsObligation)
                     {
-                        goalObligationActive = false;
+                        obligationActive = false;
                         obligationTeam = null;
+                        obligationKind = null;
                     }
                 }
                 ballHolder = newHolder;
@@ -942,12 +1002,13 @@ public class GnomeballPlugin extends Plugin
             case "BALL_CLEARED":
             {
                 // No longer auto-fired after a goal — this is now purely the host's manual "Clear Ball"
-                // action, which doubles as an override to release a stuck goal obligation (e.g. a rogue
-                // player who won't return the ball to a referee).
+                // action, which doubles as an override to release a stuck obligation (e.g. a rogue
+                // player who won't return the ball to the required target).
                 ballHolder = null;
                 tagObligationTagger = null;
-                goalObligationActive = false;
+                obligationActive = false;
                 obligationTeam = null;
+                obligationKind = null;
                 break;
             }
             case "PLAYER_TAGGED":
@@ -1076,8 +1137,9 @@ public class GnomeballPlugin extends Plugin
         if (snap.ballHolder != null) ballHolder = snap.ballHolder;
         if (snap.obligationActive != null)
         {
-            goalObligationActive = snap.obligationActive;
+            obligationActive = snap.obligationActive;
             obligationTeam = snap.obligationActive ? snap.obligationTeam : null;
+            obligationKind = snap.obligationActive ? snap.obligationKind : null;
         }
 
         if (snap.status != null)
@@ -1462,11 +1524,13 @@ public class GnomeballPlugin extends Plugin
     public long          getPausedRemainingMs() { return pausedRemainingMs; }
     public String        getBallHolder()              { return ballHolder; }
     public String        getTagObligationTagger()     { return tagObligationTagger; }
-    public boolean        isGoalObligationActive()    { return goalObligationActive; }
+    public boolean        isObligationActive()        { return obligationActive; }
     public String         getObligationTeam()         { return obligationTeam; }
+    public String         getObligationKind()         { return obligationKind; }
     public long          getInterceptionFlashUntil() { return interceptionFlashUntil; }
     public String        getInterceptionPlayer()     { return interceptionPlayer; }
     public String        getInterceptionTeam()       { return interceptionTeam; }
+    public long          getOutOfBoundsFlashUntil()  { return outOfBoundsFlashUntil; }
 
     public boolean isReferee()
     {
@@ -1668,8 +1732,9 @@ public class GnomeballPlugin extends Plugin
         timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0; ballHolder = null;
         tagObligationTagger = null;
         tagImmunePlayer = null; tagImmuneUntil = 0;
-        goalObligationActive = false; obligationTeam = null;
+        obligationActive = false; obligationTeam = null; obligationKind = null;
         interceptionFlashUntil = 0; interceptionPlayer = null; interceptionTeam = null;
+        outOfBoundsFlashUntil = 0;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
     }
