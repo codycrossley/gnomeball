@@ -22,8 +22,6 @@ public class GnomeballPanel extends PluginPanel
 
     private final GnomeballPlugin plugin;
 
-    private final JLabel statusPill = new JLabel("Disconnected");
-
     private final CardLayout cardLayout = new CardLayout();
     private final JPanel cardPanel = new JPanel(cardLayout);
 
@@ -121,12 +119,6 @@ public class GnomeballPanel extends PluginPanel
         title.setFont(FontManager.getRunescapeBoldFont());
         title.setForeground(ColorScheme.BRAND_ORANGE);
         header.add(title, BorderLayout.WEST);
-
-        statusPill.setOpaque(true);
-        statusPill.setBorder(new EmptyBorder(3, 8, 3, 8));
-        statusPill.setHorizontalAlignment(SwingConstants.CENTER);
-        setStatus("Disconnected", ColorScheme.MEDIUM_GRAY_COLOR);
-        header.add(statusPill, BorderLayout.EAST);
 
         top.add(header);
         return top;
@@ -623,12 +615,10 @@ public class GnomeballPanel extends PluginPanel
         switch (phase)
         {
             case DISCONNECTED:
-                setStatus("Disconnected", ColorScheme.MEDIUM_GRAY_COLOR);
                 cardLayout.show(cardPanel, "CONNECT");
                 break;
 
             case LOBBY:
-                setStatus("Lobby", new Color(180, 140, 40));
                 cardLayout.show(cardPanel, "IN_GAME");
                 joinCodeValueLabel.setText(jc != null ? jc : "—");
                 refreshScoreboard();
@@ -642,7 +632,6 @@ public class GnomeballPanel extends PluginPanel
                 break;
 
             case ACTIVE:
-                setStatus("In Game", new Color(60, 180, 60));
                 cardLayout.show(cardPanel, "IN_GAME");
                 joinCodeValueLabel.setText(jc != null ? jc : "—");
                 refreshScoreboard();
@@ -657,7 +646,6 @@ public class GnomeballPanel extends PluginPanel
                 break;
 
             case ENDED:
-                setStatus("Ended", new Color(140, 60, 60));
                 cardLayout.show(cardPanel, "IN_GAME");
                 refreshScoreboard();
                 hostControlsCard.setVisible(false);
@@ -701,7 +689,7 @@ public class GnomeballPanel extends PluginPanel
             Color roleColor = roleColor(entry.role);
             Color nameColor = entry.joined ? Color.WHITE : ColorScheme.MEDIUM_GRAY_COLOR;
 
-            JLabel numLabel = new JLabel(entry.number);
+            JLabel numLabel = new JLabel(entry.role == GnomeballRole.REFEREE ? "Ref" : entry.number);
             numLabel.setForeground(roleColor);
             numLabel.setFont(FontManager.getRunescapeSmallFont());
 
@@ -893,13 +881,6 @@ public class GnomeballPanel extends PluginPanel
             case OBSERVER: return "Observer";
             default:       return role.name();
         }
-    }
-
-    private void setStatus(String text, Color bg)
-    {
-        statusPill.setText(text);
-        statusPill.setBackground(bg);
-        statusPill.setForeground(Color.WHITE);
     }
 
     private static String buildRosterKey(List<RosterReducer.RosterEntry> entries)

@@ -17,14 +17,16 @@ public class TimerOverlay extends Overlay
     private static final Color COLOR_REFEREE  = new Color(60, 179, 74, 220);
     private static final Color COLOR_BALL     = new Color(255, 210, 0, 220);
     private static final Color BG_COLOR       = new Color(0, 0, 0, 140);
+    private static final Color COLOR_PAUSE_GLOW = new Color(255, 200, 60, 255);
     private static final int   WARN_SECS     = 30;
     private static final int   DANGER_SECS   = 10;
+    private static final long  PULSE_PERIOD_MS = 1400;
 
     private final Client client;
     private final GnomeballPlugin plugin;
 
-    private final Font timerFont = FontManager.getRunescapeBoldFont().deriveFont(18f);
-    private final Font scoreFont = FontManager.getRunescapeBoldFont().deriveFont(20f);
+    private final Font timerFont = FontManager.getRunescapeBoldFont().deriveFont(22f);
+    private final Font scoreFont = FontManager.getRunescapeBoldFont().deriveFont(24f);
     private final Font goalFont  = FontManager.getRunescapeBoldFont().deriveFont(48f);
 
     public TimerOverlay(Client client, GnomeballPlugin plugin)
@@ -41,7 +43,7 @@ public class TimerOverlay extends Overlay
     public Dimension render(Graphics2D g)
     {
         GamePhase phase = plugin.getPhase();
-        if (phase != GamePhase.ACTIVE && phase != GamePhase.ENDED) return null;
+        if (phase == GamePhase.DISCONNECTED) return null;
 
         final String text;
         final Color color;
@@ -50,6 +52,11 @@ public class TimerOverlay extends Overlay
         {
             String winner = plugin.getWinner();
             text = winner != null ? winner + " WIN!" : "GAME OVER";
+            color = COLOR_PLENTY;
+        }
+        else if (phase == GamePhase.LOBBY)
+        {
+            text = "GAME NOT STARTED";
             color = COLOR_PLENTY;
         }
         else
@@ -64,17 +71,17 @@ public class TimerOverlay extends Overlay
             long seconds = remaining % 60;
             text = String.format("%d:%02d", minutes, seconds);
 
-            if (plugin.isTimerPaused())         color = COLOR_REFEREE;
+            if (plugin.isTimerPaused())         color = COLOR_BALL;
             else if (remaining <= DANGER_SECS)  color = COLOR_DANGER;
             else if (remaining <= WARN_SECS)    color = COLOR_WARNING;
-            else                                color = COLOR_PLENTY;
+            else                                color = COLOR_REFEREE;
         }
 
         g.setFont(timerFont);
         FontMetrics timerFm = g.getFontMetrics();
         int timerW = timerFm.stringWidth(text);
         int timerH = timerFm.getAscent();
-        int pad = 6;
+        int pad = 10;
 
         String scoreA = String.valueOf(plugin.getTeamAScore());
         String scoreB = String.valueOf(plugin.getTeamBScore());
@@ -95,6 +102,14 @@ public class TimerOverlay extends Overlay
 
         g.setColor(BG_COLOR);
         g.fillRoundRect(0, 0, boxW, boxH, 6, 6);
+
+        if (phase == GamePhase.ACTIVE)
+        {
+            if (plugin.isTimerPaused())
+                renderPauseGlow(g, boxW, boxH);
+            else
+                renderRunningOutline(g, boxW, boxH);
+        }
 
         g.setFont(timerFont);
         int timerX = (boxW - timerW) / 2;
@@ -120,6 +135,28 @@ public class TimerOverlay extends Overlay
         renderHostMessageFlash(g);
 
         return new Dimension(boxW, boxH);
+    }
+
+    private void renderPauseGlow(Graphics2D g, int boxW, int boxH)
+    {
+        long phaseMs = System.currentTimeMillis() % PULSE_PERIOD_MS;
+        float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / PULSE_PERIOD_MS));
+        int alpha = (int) (100 + 155 * pulse);
+
+        Stroke oldStroke = g.getStroke();
+        g.setStroke(new BasicStroke(2.5f));
+        g.setColor(withAlpha(COLOR_PAUSE_GLOW, alpha / 255f));
+        g.drawRoundRect(1, 1, boxW - 3, boxH - 3, 6, 6);
+        g.setStroke(oldStroke);
+    }
+
+    private void renderRunningOutline(Graphics2D g, int boxW, int boxH)
+    {
+        Stroke oldStroke = g.getStroke();
+        g.setStroke(new BasicStroke(2.5f));
+        g.setColor(COLOR_REFEREE);
+        g.drawRoundRect(1, 1, boxW - 3, boxH - 3, 6, 6);
+        g.setStroke(oldStroke);
     }
 
     private void renderPossessionIndicator(Graphics2D g, int scoreStartX, int scoreAW, int dashW, int scoreBW, int scoreY, int ballIndicatorSpace)

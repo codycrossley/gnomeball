@@ -7,8 +7,10 @@ import java.awt.image.BufferedImage;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -63,7 +65,9 @@ public class GnomeballPlugin extends Plugin
     private static final String KEY_PHASE     = "activePhase";
     private static final String KEY_DEADLINE  = "activeDeadlineMs";
     private static final String KEY_CUSTOM_FIELD_SLOTS = "customFieldSlots";
+    private static final String KEY_HOSTED_GAMES = "hostedGameKeys";
     private static final int CUSTOM_SLOT_COUNT = 3;
+    private static final int MAX_REMEMBERED_HOST_GAMES = 5;
 
     private static final int    GNOMEBALL_ITEM_ID = 2528;
     private static final int    PEACEFUL_HANDEGG_ITEM_ID = 9470; // F2P-accessible substitute for the Gnomeball
@@ -126,6 +130,20 @@ public class GnomeballPlugin extends Plugin
     // ---- game state ----
     private volatile String gameId   = null;
     private volatile String writeKey = null;
+
+    // Write keys for games this account has hosted, keyed by gameId. Kept separate from the
+    // active-session config (KEY_WRITE_KEY et al.) so that leaving a game — which clears the
+    // active session — doesn't strand the host without a way to reclaim host privileges if they
+    // rejoin the same still-live game later. Bounded so it doesn't grow across a long history of
+    // hosted games.
+    private final Map<String, String> hostedGameKeys = new LinkedHashMap<String, String>()
+    {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, String> eldest)
+        {
+            return size() > MAX_REMEMBERED_HOST_GAMES;
+        }
+    };
     private volatile String joinCode = null;
     private volatile String hostRsn  = null;
     private volatile GamePhase phase = GamePhase.DISCONNECTED;
@@ -173,6 +191,7 @@ public class GnomeballPlugin extends Plugin
         rosterReducer = new RosterReducer();
         tileReducer   = new TileReducer();
         loadCustomFieldSlots();
+        loadHostedGameKeys();
 
         panel = new GnomeballPanel(this);
         BufferedImage icon = ImageUtil.loadImageResource(getClass(), "panel_icon.png");
@@ -1102,6 +1121,7 @@ public class GnomeballPlugin extends Plugin
                 joinCode = result.joinCode;
                 hostRsn  = rsn;
                 phase    = GamePhase.LOBBY;
+                rememberHostKey(gameId, writeKey);
                 saveSession();
                 poller.start(gameId);
                 startPeriodicTasks();
@@ -1125,7 +1145,10 @@ public class GnomeballPlugin extends Plugin
                 gameId   = result.gameId;
                 joinCode = code.toUpperCase(Locale.ROOT);
                 hostRsn  = result.hostRsn;
-                writeKey = null;
+                // Rejoining a game this account previously hosted (e.g. after clicking "Leave")
+                // restores host privileges from the cached write key instead of leaving us stuck
+                // as a regular player.
+                writeKey = (hostRsn != null && hostRsn.equalsIgnoreCase(rsn)) ? hostedGameKeys.get(gameId) : null;
                 phase    = GamePhase.LOBBY;
 
                 ApiClient.RosterSnapshot snap = apiClient.fetchRoster(gameId);
@@ -1402,6 +1425,26 @@ public class GnomeballPlugin extends Plugin
             raw.add(preset != null ? preset.tiles : List.of());
         }
         configManager.setConfiguration(CONFIG_GROUP, KEY_CUSTOM_FIELD_SLOTS, gson.toJson(raw));
+    }
+
+    private void loadHostedGameKeys()
+    {
+        try
+        {
+            String json = configManager.getRSProfileConfiguration(CONFIG_GROUP, KEY_HOSTED_GAMES, String.class);
+            if (json == null || json.isBlank()) return;
+            Type type = new TypeToken<Map<String, String>>() {}.getType();
+            Map<String, String> saved = gson.fromJson(json, type);
+            if (saved != null) hostedGameKeys.putAll(saved);
+        }
+        catch (Exception ex) { log.warn("Failed to load hosted game keys: {}", ex.getMessage()); }
+    }
+
+    private void rememberHostKey(String gid, String key)
+    {
+        if (gid == null || key == null) return;
+        hostedGameKeys.put(gid, key);
+        configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_HOSTED_GAMES, gson.toJson(hostedGameKeys));
     }
 
     public String        getZoneTeam()     { return zoneTeam; }

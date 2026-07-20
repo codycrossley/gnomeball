@@ -79,10 +79,14 @@ public class PlayerOverlay extends Overlay
                 }
             }
 
+            boolean isReferee = role == GnomeballRole.REFEREE;
             String number = roster.getNumber(rsn);
-            if (number == null || number.isEmpty()) continue;
+            if (!isReferee && (number == null || number.isEmpty())) continue;
 
-            String text = number;
+            // Referees get an icon instead of a jersey number, but we still measure against a
+            // placeholder string so the anchor position (and vertical spacing above the head)
+            // matches the numbered players.
+            String text = isReferee ? "REF" : number;
             int textWidth = fm.stringWidth(text);
             int textHeight = fm.getHeight();
 
@@ -131,13 +135,66 @@ public class PlayerOverlay extends Overlay
                 drawTagArrow(g, cx, hasBall ? topY - 16 : topY);
             }
 
-            g.setColor(Color.BLACK);
-            g.drawString(text, loc.getX() + 1, loc.getY() + 1);
-            g.setColor(color);
-            g.drawString(text, loc.getX(), loc.getY());
+            if (isReferee)
+            {
+                drawCheckeredFlag(g, cx, loc.getY() - fm.getAscent() / 2);
+            }
+            else
+            {
+                g.setColor(Color.BLACK);
+                g.drawString(text, loc.getX() + 1, loc.getY() + 1);
+                g.setColor(color);
+                g.drawString(text, loc.getX(), loc.getY());
+            }
         }
 
         return null;
+    }
+
+    /** Draws a small checkered referee's flag (pole + checkered banner) centered at {@code (cx, cy)}. */
+    private static void drawCheckeredFlag(Graphics2D g, int cx, int cy)
+    {
+        int poleX = cx - 10;
+        int poleTop = cy - 10;
+        int poleBottom = cy + 10;
+        int flagW = 16, flagH = 10;
+        int cols = 4, rows = 2;
+        int cellW = flagW / cols;
+        int cellH = flagH / rows;
+
+        Stroke oldStroke = g.getStroke();
+
+        // pole
+        g.setStroke(new BasicStroke(4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.setColor(Color.BLACK);
+        g.drawLine(poleX, poleTop, poleX, poleBottom);
+        g.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.setColor(new Color(216, 210, 194));
+        g.drawLine(poleX, poleTop, poleX, poleBottom);
+        g.setStroke(oldStroke);
+
+        // banner outline
+        g.setColor(Color.BLACK);
+        g.fillRect(poleX - 1, poleTop - 1, flagW + 2, flagH + 2);
+
+        // checker squares
+        g.setColor(Color.WHITE);
+        g.fillRect(poleX, poleTop, flagW, flagH);
+        g.setColor(Color.BLACK);
+        for (int r = 0; r < rows; r++)
+        {
+            for (int c = 0; c < cols; c++)
+            {
+                if ((r + c) % 2 == 0)
+                {
+                    g.fillRect(poleX + c * cellW, poleTop + r * cellH, cellW, cellH);
+                }
+            }
+        }
+
+        // hoist stripe at the pole edge, tying the icon back to the referee role color
+        g.setColor(COLOR_REFEREE);
+        g.fillRect(poleX - 1, poleTop - 1, 3, flagH + 2);
     }
 
     /** Draws a flashing, bobbing downward-pointing arrow centered at {@code cx}, tip resting at {@code tipY}. */
