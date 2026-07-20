@@ -79,6 +79,8 @@ public class GnomeballPlugin extends Plugin
     private static final int    TAG_SPOTANIM_ID = 80;
     private static final int    ITEM_RUBBER_CHICKEN = 4566;
     private static final int    ITEM_STALE_BAGUETTE = 20590;
+    private static final int    ITEM_BEACH_BOXING_GLOVES_YELLOW = 11705;
+    private static final int    ITEM_BEACH_BOXING_GLOVES_PINK   = 11706;
     private static final long   TAG_IMMUNITY_MS = 1200; // 2 game ticks @ 600ms each
 
     @Inject private Client client;
@@ -542,7 +544,7 @@ public class GnomeballPlugin extends Plugin
         boolean selfIsTeam = selfRole == GnomeballRole.TEAM_A || selfRole == GnomeballRole.TEAM_B;
         if (!attackerIsTeam || !selfIsTeam || attackerRole == selfRole) return;
 
-        // Must be wielding a whackable weapon (Rubber chicken / Stale baguette)
+        // Must be wielding a tagging-eligible item (Rubber chicken / Stale baguette / Beach boxing gloves)
         PlayerComposition comp = attacker.getPlayerComposition();
         if (comp == null) return;
         int[] equipIds = comp.getEquipmentIds();
@@ -550,7 +552,8 @@ public class GnomeballPlugin extends Plugin
         int weaponSlotId = equipIds[KitType.WEAPON.getIndex()];
         if (weaponSlotId < PlayerComposition.ITEM_OFFSET) return;
         int weaponId = weaponSlotId - PlayerComposition.ITEM_OFFSET;
-        if (weaponId != ITEM_RUBBER_CHICKEN && weaponId != ITEM_STALE_BAGUETTE) return;
+        if (weaponId != ITEM_RUBBER_CHICKEN && weaponId != ITEM_STALE_BAGUETTE
+            && weaponId != ITEM_BEACH_BOXING_GLOVES_YELLOW && weaponId != ITEM_BEACH_BOXING_GLOVES_PINK) return;
 
         final String gid = gameId;
         if (gid == null) return;

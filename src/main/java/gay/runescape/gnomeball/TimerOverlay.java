@@ -254,7 +254,7 @@ public class TimerOverlay extends Overlay
         if (remaining <= 0) return;
 
         float alpha = Math.min(1f, remaining / 500f);
-        Color whistleColor = withAlpha(COLOR_REFEREE, alpha);
+        Color whistleColor = withAlpha(COLOR_BALL, alpha);
         Color shadowColor = new Color(0, 0, 0, (int) (180 * alpha));
 
         int canvasW = client.getCanvasWidth();
