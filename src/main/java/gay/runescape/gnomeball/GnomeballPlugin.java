@@ -297,6 +297,8 @@ public class GnomeballPlugin extends Plugin
     @Subscribe
     public void onMenuEntryAdded(MenuEntryAdded event)
     {
+        filterOffRosterPlayerEntry(event);
+
         if (!isHost()) return;
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return;
 
@@ -338,6 +340,34 @@ public class GnomeballPlugin extends Plugin
             .setOption("<col=" + COLOR_REFEREE + ">Referee</col>")
             .setTarget("").setType(MenuAction.RUNELITE_PLAYER).setIdentifier(event.getIdentifier())
             .onClick(me -> handleEnlistClick(me, GnomeballRole.REFEREE));
+    }
+
+    /** While enlisted on a team during an active game, strips any menu entry targeting another
+     * player who isn't part of the game (unlisted, or an OBSERVER) — e.g. "Follow", "Trade with",
+     * or "Use Gnomeball ->" on a random bystander — so a team player can't accidentally interact
+     * with (and, in particular, pass the ball to) someone who was never in the roster. NPCs,
+     * objects, and ground items are untouched; only entries whose actor is a Player are inspected. */
+    private void filterOffRosterPlayerEntry(MenuEntryAdded event)
+    {
+        if (phase != GamePhase.ACTIVE) return;
+
+        String localRsn = localRsn();
+        if (localRsn == null) return;
+        GnomeballRole myRole = rosterReducer.getRole(localRsn);
+        if (myRole != GnomeballRole.TEAM_A && myRole != GnomeballRole.TEAM_B) return;
+
+        MenuEntry entry = event.getMenuEntry();
+        if (!(entry.getActor() instanceof Player)) return;
+        Player target = (Player) entry.getActor();
+        if (target == null || target == client.getLocalPlayer() || target.getName() == null) return;
+
+        String targetRsn = Text.toJagexName(target.getName());
+        if (targetRsn == null || targetRsn.isBlank()) return;
+
+        GnomeballRole targetRole = rosterReducer.getRole(targetRsn);
+        if (targetRole == GnomeballRole.TEAM_A || targetRole == GnomeballRole.TEAM_B || targetRole == GnomeballRole.REFEREE) return;
+
+        client.getMenu().removeMenuEntry(entry);
     }
 
     @Subscribe
