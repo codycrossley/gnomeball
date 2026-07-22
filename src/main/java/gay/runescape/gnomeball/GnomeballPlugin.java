@@ -298,6 +298,7 @@ public class GnomeballPlugin extends Plugin
     public void onMenuEntryAdded(MenuEntryAdded event)
     {
         filterOffRosterPlayerEntry(event);
+        colorizeRosterPlayerEntry(event);
 
         if (!isHost()) return;
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return;
@@ -320,6 +321,8 @@ public class GnomeballPlugin extends Plugin
 
         if (!"Follow".equals(event.getOption())) return;
         if (!(event.getMenuEntry().getActor() instanceof Player)) return;
+        Player followTarget = (Player) event.getMenuEntry().getActor();
+        String followTargetRsn = followTarget.getName() != null ? Text.toJagexName(followTarget.getName()) : null;
 
         MenuEntry enlistEntry = client.createMenuEntry(-1)
             .setOption("Enlist")
@@ -368,6 +371,30 @@ public class GnomeballPlugin extends Plugin
         if (targetRole == GnomeballRole.TEAM_A || targetRole == GnomeballRole.TEAM_B || targetRole == GnomeballRole.REFEREE) return;
 
         client.getMenu().removeMenuEntry(entry);
+    }
+
+    /** Recolors a player-targeted menu entry's target text to match that player's team/referee
+     * color, so e.g. "Follow" or "Trade with" on an enlisted player reads in team colors instead
+     * of the client's default (usually white/friend-list) color. Applies during LOBBY and ACTIVE,
+     * regardless of the local player's own role — this is purely a legibility aid, not a
+     * restriction, so hosts/observers/referees see the coloring too. */
+    private void colorizeRosterPlayerEntry(MenuEntryAdded event)
+    {
+        if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return;
+
+        MenuEntry entry = event.getMenuEntry();
+        if (!(entry.getActor() instanceof Player)) return;
+        Player target = (Player) entry.getActor();
+        if (target == null || target.getName() == null) return;
+
+        String targetRsn = Text.toJagexName(target.getName());
+        if (targetRsn == null || targetRsn.isBlank()) return;
+
+        String colorHex = roleColorHex(rosterReducer.getRole(targetRsn));
+        if (colorHex == null) return;
+
+        String plainTarget = Text.removeTags(entry.getTarget());
+        entry.setTarget("<col=" + colorHex + ">" + plainTarget + "</col>");
     }
 
     @Subscribe
