@@ -305,6 +305,19 @@ public class ApiClient
         }
     }
 
+    public void setTimer(String gameId, String playerRsn, long remainingMs) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("remainingMs", remainingMs);
+
+        try (Response resp = post("/v1/games/" + gameId + "/set-timer", body, null))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Set timer failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     public void sendHeartbeat(String gameId, String playerRsn) throws IOException
     {
         JsonObject body = new JsonObject();

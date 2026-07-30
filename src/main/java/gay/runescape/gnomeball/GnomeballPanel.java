@@ -82,6 +82,7 @@ public class GnomeballPanel extends PluginPanel
     private final JPanel  refereePanel    = new JPanel();
     private final JButton whistleBtn      = new JButton("Blow Whistle");
     private final JButton timerToggleBtn  = new JButton("STOP");
+    private final JButton setClockBtn     = new JButton("Set Clock");
 
     // All players
     private final JButton leaveGameBtn = new JButton("Leave Game");
@@ -583,11 +584,17 @@ public class GnomeballPanel extends PluginPanel
         timerToggleBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         timerToggleBtn.addActionListener(e -> plugin.onTimerStartStopClicked());
 
+        setClockBtn.setAlignmentX(LEFT_ALIGNMENT);
+        setClockBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        setClockBtn.addActionListener(e -> showSetClockDialog());
+
         refereePanel.add(refTitle);
         refereePanel.add(Box.createVerticalStrut(6));
         refereePanel.add(whistleBtn);
         refereePanel.add(Box.createVerticalStrut(4));
         refereePanel.add(timerToggleBtn);
+        refereePanel.add(Box.createVerticalStrut(4));
+        refereePanel.add(setClockBtn);
         card.add(refereePanel);
         card.add(Box.createVerticalStrut(4));
 
@@ -757,6 +764,36 @@ public class GnomeballPanel extends PluginPanel
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /** Prompts the referee for a minutes/seconds remaining value, prefilled with the clock's
+     * current reading (paused or live), and pushes it via {@link GnomeballPlugin#onSetClockClicked}
+     * if confirmed. */
+    private void showSetClockDialog()
+    {
+        long currentRemainingMs = plugin.isTimerPaused()
+            ? plugin.getPausedRemainingMs()
+            : Math.max(0, plugin.getDeadlineMs() - System.currentTimeMillis());
+        int totalSecs = (int) (currentRemainingMs / 1000);
+
+        JSpinner minSpinner = new JSpinner(new SpinnerNumberModel(totalSecs / 60, 0, 180, 1));
+        JSpinner secSpinner = new JSpinner(new SpinnerNumberModel(totalSecs % 60, 0, 59, 1));
+        ((JSpinner.DefaultEditor) minSpinner.getEditor()).getTextField().setColumns(3);
+        ((JSpinner.DefaultEditor) secSpinner.getEditor()).getTextField().setColumns(3);
+
+        JPanel dialogPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        dialogPanel.add(new JLabel("Min:"));
+        dialogPanel.add(minSpinner);
+        dialogPanel.add(new JLabel("Sec:"));
+        dialogPanel.add(secSpinner);
+
+        int choice = JOptionPane.showConfirmDialog(this, dialogPanel, "Set Clock",
+            JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (choice != JOptionPane.OK_OPTION) return;
+
+        int minutes = (Integer) minSpinner.getValue();
+        int seconds = (Integer) secSpinner.getValue();
+        plugin.onSetClockClicked((minutes * 60L + seconds) * 1000L);
+    }
 
     private static final int CUSTOM_GRID_INDEX = 0;
 

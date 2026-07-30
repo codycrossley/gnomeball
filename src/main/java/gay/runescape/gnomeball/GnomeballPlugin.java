@@ -1000,6 +1000,23 @@ public class GnomeballPlugin extends Plugin
                 timerPaused = false;
                 break;
             }
+            case "TIMER_SET":
+            {
+                boolean paused = safeBool(e.payload, "paused");
+                long rem = safeLong(e.payload, "remainingMs");
+                if (paused)
+                {
+                    pausedRemainingMs = rem;
+                    timerPaused = true;
+                }
+                else
+                {
+                    long dl = safeLong(e.payload, "deadlineMs");
+                    if (dl > 0) deadlineMs = dl;
+                    timerPaused = false;
+                }
+                break;
+            }
             case "BALL_ASSIGNED":
             {
                 String newHolder = safeStr(e.payload, "player");
@@ -1656,6 +1673,35 @@ public class GnomeballPlugin extends Plugin
                 catch (Exception ex) { log.warn("Pause timer failed: {}", ex.getMessage()); }
             });
         }
+    }
+
+    /** Referee-only: directly sets the remaining game time, whether the clock is currently
+     * running or paused. Mirrors the optimistic-update pattern of {@link #onTimerStartStopClicked()}
+     * — local state updates immediately so the referee's own screen reflects the change without
+     * waiting on the poll round-trip, and the server's echoed TIMER_SET event is what every other
+     * client actually applies. */
+    public void onSetClockClicked(long remainingMs)
+    {
+        final String gid = gameId;
+        final String rsn = localRsn();
+        if (gid == null || rsn == null) return;
+
+        final long remaining = Math.max(0, remainingMs);
+        if (timerPaused)
+        {
+            pausedRemainingMs = remaining;
+        }
+        else
+        {
+            deadlineMs = System.currentTimeMillis() + remaining;
+        }
+        SwingUtilities.invokeLater(() -> panel.refresh());
+
+        executor.submit(() ->
+        {
+            try { apiClient.setTimer(gid, rsn, remaining); }
+            catch (Exception ex) { log.warn("Set timer failed: {}", ex.getMessage()); }
+        });
     }
 
     public void startZoneMode(String team)
