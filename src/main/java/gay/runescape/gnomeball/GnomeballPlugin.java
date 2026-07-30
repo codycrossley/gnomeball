@@ -98,6 +98,7 @@ public class GnomeballPlugin extends Plugin
     private PlayerOverlay playerOverlay;
     private TimerOverlay timerOverlay;
     private TileOverlay tileOverlay;
+    private ConfettiOverlay confettiOverlay;
 
     private ApiClient apiClient;
     private EventPoller poller;
@@ -174,6 +175,14 @@ public class GnomeballPlugin extends Plugin
     private volatile String interceptionPlayer     = null;
     private volatile String interceptionTeam       = null;
     private volatile long   outOfBoundsFlashUntil  = 0;
+    private volatile long gameEndFlashUntil = 0;
+    private volatile long confettiUntil = 0;
+    // Edge-trigger latch for the clock-reaches-zero celebration: only true once the countdown has
+    // actually crossed from >0 into <=0, so the celebration fires exactly once per expiry rather
+    // than on every tick spent sitting at zero. Deliberately left untouched while paused (see
+    // checkClockExpiry) so a referee pausing right at the buzzer and resuming afterward doesn't
+    // cause a spurious replay.
+    private volatile boolean clockAtZero = false;
     private volatile long goalFlashUntil = 0;
     private volatile String goalFlashTeam = null;
     private volatile int goalFlashOldScore = 0;
@@ -210,9 +219,11 @@ public class GnomeballPlugin extends Plugin
         playerOverlay = new PlayerOverlay(client, config, this, rosterReducer, modelOutlineRenderer);
         timerOverlay = new TimerOverlay(client, this);
         tileOverlay = new TileOverlay(client, config, this, tileReducer);
+        confettiOverlay = new ConfettiOverlay(client, this);
         overlayManager.add(playerOverlay);
         overlayManager.add(timerOverlay);
         overlayManager.add(tileOverlay);
+        overlayManager.add(confettiOverlay);
 
         poller = new EventPoller(apiClient, new EventPoller.Listener()
         {
@@ -240,6 +251,7 @@ public class GnomeballPlugin extends Plugin
         if (playerOverlay != null) overlayManager.remove(playerOverlay);
         if (timerOverlay != null) overlayManager.remove(timerOverlay);
         if (tileOverlay != null) overlayManager.remove(tileOverlay);
+        if (confettiOverlay != null) overlayManager.remove(confettiOverlay);
         if (navButton != null) clientToolbar.removeNavigation(navButton);
         resetState();
     }
@@ -288,6 +300,7 @@ public class GnomeballPlugin extends Plugin
             interceptionFlashUntil = 0; interceptionPlayer = null; interceptionTeam = null;
             outOfBoundsFlashUntil = 0;
             hostMessageText = null; hostMessageFlashUntil = 0;
+            gameEndFlashUntil = 0; confettiUntil = 0; clockAtZero = false;
             if (rosterReducer != null) rosterReducer.reset();
             if (tileReducer != null) tileReducer.reset();
             SwingUtilities.invokeLater(() -> panel.refresh());
@@ -404,6 +417,8 @@ public class GnomeballPlugin extends Plugin
         // against where we were a moment ago, even if we've since stepped away.
         lastSelfPosition = client.getLocalPlayer() != null ? client.getLocalPlayer().getWorldLocation() : null;
 
+        checkClockExpiry();
+
         if (phase != GamePhase.ACTIVE || timerPaused || ballHolder == null) return;
 
         // Scoring/turnovers are disabled until the pending obligation is fulfilled
@@ -484,6 +499,29 @@ public class GnomeballPlugin extends Plugin
             try { apiClient.outOfBounds(gid, rsn); }
             catch (Exception ex) { log.warn("Out of bounds report failed: {}", ex.getMessage()); }
         });
+    }
+
+    /** Edge-triggers the win celebration the moment the countdown crosses from >0 into <=0 — the
+     * real "end of the match" from a player's perspective, independent of whether/when the host
+     * later gets around to clicking End Game. Deliberately does nothing while paused or inactive,
+     * leaving {@link #clockAtZero} exactly as it was, so a referee pausing right at the buzzer and
+     * resuming afterward can't cause a second, spurious celebration. */
+    private void checkClockExpiry()
+    {
+        if (phase != GamePhase.ACTIVE || timerPaused || deadlineMs <= 0) return;
+
+        boolean nowAtZero = System.currentTimeMillis() >= deadlineMs;
+        if (nowAtZero && !clockAtZero)
+        {
+            triggerCelebration();
+        }
+        clockAtZero = nowAtZero;
+    }
+
+    private void triggerCelebration()
+    {
+        gameEndFlashUntil = System.currentTimeMillis() + 8000;
+        confettiUntil = System.currentTimeMillis() + 5000;
     }
 
     @Subscribe
@@ -1608,6 +1646,8 @@ public class GnomeballPlugin extends Plugin
     public String        getInterceptionPlayer()     { return interceptionPlayer; }
     public String        getInterceptionTeam()       { return interceptionTeam; }
     public long          getOutOfBoundsFlashUntil()  { return outOfBoundsFlashUntil; }
+    public long          getGameEndFlashUntil()      { return gameEndFlashUntil; }
+    public long          getConfettiUntil()          { return confettiUntil; }
 
     public boolean isReferee()
     {
@@ -1841,6 +1881,7 @@ public class GnomeballPlugin extends Plugin
         obligationActive = false; obligationTeam = null; obligationKind = null;
         interceptionFlashUntil = 0; interceptionPlayer = null; interceptionTeam = null;
         outOfBoundsFlashUntil = 0;
+        gameEndFlashUntil = 0; confettiUntil = 0; clockAtZero = false;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
     }

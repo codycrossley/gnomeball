@@ -50,8 +50,8 @@ public class TimerOverlay extends Overlay
 
         if (phase == GamePhase.ENDED)
         {
-            String winner = plugin.getWinner();
-            text = winner != null ? winner + " WIN!" : "GAME OVER";
+            String winnerName = resolveWinnerName();
+            text = winnerName != null ? winnerName + " WIN!" : "GAME OVER";
             color = COLOR_PLENTY;
         }
         else if (phase == GamePhase.LOBBY)
@@ -133,8 +133,25 @@ public class TimerOverlay extends Overlay
         renderWhistleFlash(g);
         renderInterceptionFlash(g);
         renderHostMessageFlash(g);
+        renderGameEndFlash(g);
 
         return new Dimension(boxW, boxH);
+    }
+
+    /** The server currently never supplies an explicit winner on game end (host-forced end always
+     * reports {@code winner: null}) — so the real signal is just "who has more points," which is
+     * already synced identically to every client. Falls back to the server's value first in case
+     * that ever changes (e.g. a future sudden-death/admin-declared winner). */
+    private String resolveWinnerName()
+    {
+        String serverWinner = plugin.getWinner();
+        if (serverWinner != null && !serverWinner.isBlank()) return serverWinner;
+
+        int a = plugin.getTeamAScore();
+        int b = plugin.getTeamBScore();
+        if (a > b) return plugin.getTeamAName();
+        if (b > a) return plugin.getTeamBName();
+        return null;
     }
 
     private void renderPauseGlow(Graphics2D g, int boxW, int boxH)
@@ -316,6 +333,66 @@ public class TimerOverlay extends Overlay
         g.drawString(interceptingPlayer, nameX + 2, nameY + 2);
         g.setColor(nameColor);
         g.drawString(interceptingPlayer, nameX, nameY);
+    }
+
+    private static final Font finalScoreFont = FontManager.getRunescapeBoldFont().deriveFont(36f);
+    private static final Font congratsFont   = FontManager.getRunescapeBoldFont().deriveFont(26f);
+
+    private void renderGameEndFlash(Graphics2D g)
+    {
+        long flashUntil = plugin.getGameEndFlashUntil();
+        long remaining = flashUntil - System.currentTimeMillis();
+        if (remaining <= 0) return;
+
+        String winnerName = resolveWinnerName();
+        float alpha = Math.min(1f, remaining / 500f);
+        Color shadowColor = new Color(0, 0, 0, (int) (180 * alpha));
+        Color scoreColor = withAlpha(COLOR_PLENTY, alpha);
+        Color winnerColor = winnerName == null ? COLOR_PLENTY
+            : winnerName.equals(plugin.getTeamAName()) ? COLOR_TEAM_A : COLOR_TEAM_B;
+        Color congratsColor = withAlpha(winnerColor, alpha);
+
+        int canvasW = client.getCanvasWidth();
+        int canvasH = client.getCanvasHeight();
+
+        String label = "FINAL SCORE: ";
+        String scoreAStr = String.valueOf(plugin.getTeamAScore());
+        String dash = " - ";
+        String scoreBStr = String.valueOf(plugin.getTeamBScore());
+        String scoreText = label + scoreAStr + dash + scoreBStr;
+
+        g.setFont(finalScoreFont);
+        FontMetrics scoreFm = g.getFontMetrics();
+        int labelW = scoreFm.stringWidth(label);
+        int aW = scoreFm.stringWidth(scoreAStr);
+        int dashW = scoreFm.stringWidth(dash);
+        int scoreW = scoreFm.stringWidth(scoreText);
+        int scoreX = (canvasW - scoreW) / 2;
+        int scoreY = canvasH / 3;
+
+        g.setColor(shadowColor);
+        g.drawString(scoreText, scoreX + 2, scoreY + 2);
+
+        g.setColor(scoreColor);
+        g.drawString(label, scoreX, scoreY);
+        g.setColor(withAlpha(COLOR_TEAM_A, alpha));
+        g.drawString(scoreAStr, scoreX + labelW, scoreY);
+        g.setColor(scoreColor);
+        g.drawString(dash, scoreX + labelW + aW, scoreY);
+        g.setColor(withAlpha(COLOR_TEAM_B, alpha));
+        g.drawString(scoreBStr, scoreX + labelW + aW + dashW, scoreY);
+
+        String congratsText = winnerName != null ? "Congratulations " + winnerName + "!" : "It's a tie!";
+        g.setFont(congratsFont);
+        FontMetrics congratsFm = g.getFontMetrics();
+        int congratsW = congratsFm.stringWidth(congratsText);
+        int congratsX = (canvasW - congratsW) / 2;
+        int congratsY = scoreY + scoreFm.getHeight() + 10;
+
+        g.setColor(shadowColor);
+        g.drawString(congratsText, congratsX + 2, congratsY + 2);
+        g.setColor(congratsColor);
+        g.drawString(congratsText, congratsX, congratsY);
     }
 
     private static final Font hostMessageFont = FontManager.getRunescapeBoldFont().deriveFont(20f);

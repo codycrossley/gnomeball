@@ -59,6 +59,9 @@ Hosts mark tiles as **Field**, **Zone A**, **Zone B**, or a plain **Standard** m
 
 Any preset can be rotated in 90° steps before being committed, and the exact same placement math drives both the live preview and the final commit so they can never disagree. Placing/removing a preset acts on every tile in its footprint, clearing whatever was there before (so overlapping zone-on-field markings don't leave stray leftovers). Zones can also be drawn freehand, tile by tile.
 
+### Game end
+The moment the countdown clock hits 0:00 — not whenever the host happens to click "End Game" — every client shows a "FINAL SCORE: A - B" / "Congratulations \<team\>!" banner (or "It's a tie!") for a few seconds, backed by a burst of falling confetti across the whole screen. This fires client-side off the clock itself so it isn't tied to (or delayed by) any host action; the winning team is derived from the final scores directly (whichever team has more points), since the server doesn't currently compute or send an explicit winner on a host-forced end.
+
 ## Architecture
 
 The plugin is a **client-only RuneLite plugin** (`GnomeballPlugin`, entry point `gay.runescape.gnomeball.GnomeballPlugin`) that talks to a separate, self-hosted **Gnomeball API** server over HTTP. The server is the single source of truth for all shared game state (roster, score, ball possession, obligations, timer, tiles); the plugin never derives authoritative state purely from local observation — it reports candidate events to the server and waits for the server to echo them back before updating shared UI.
@@ -76,7 +79,8 @@ RuneLite client                         Gnomeball API server
 │   ├─ GnomeballPanel (sidebar) │
 │   ├─ PlayerOverlay            │
 │   ├─ TileOverlay               │
-│   └─ TimerOverlay              │
+│   ├─ TimerOverlay              │
+│   └─ ConfettiOverlay           │
 └─────────────────────────────┘
 ```
 
@@ -94,10 +98,11 @@ RuneLite client                         Gnomeball API server
 
 - **`GnomeballPanel`** — the Swing sidebar UI (`PluginPanel`): a "Connect" card (create/join) and an "In Game" card (scoreboard with inline team renaming/score correction, roster list with a host-only right-click role/ball-assignment menu, field-preset and zone-marking tools, host pre-start/in-game controls, referee controls, leave button).
 
-- **Overlays** (`PlayerOverlay`, `TileOverlay`, `TimerOverlay`) — pure rendering, driven entirely by the plugin's current state:
+- **Overlays** (`PlayerOverlay`, `TileOverlay`, `TimerOverlay`, `ConfettiOverlay`) — pure rendering, driven entirely by the plugin's current state:
   - `PlayerOverlay` draws jersey numbers/referee icon above players' heads, a ball indicator on the current holder, a pulsing "pass here" arrow on whoever owes a tag/delivery obligation, and a colored model outline for enlisted players standing on the field.
   - `TileOverlay` renders committed field/zone tiles (outlined as a connected region for Field/Zone A/Zone B, filled individually for plain "Standard" markers), plus live previews while a host is placing/removing a preset or drawing a zone, including an out-of-bounds pulse-flash.
-  - `TimerOverlay` renders the clock/scoreboard box (top-left) plus full-screen flash banners for goals, whistle blows, interceptions, and host announcements.
+  - `TimerOverlay` renders the clock/scoreboard box (top-left) plus full-screen flash banners for goals, whistle blows, interceptions, host announcements, and the game-end final score/congratulations banner.
+  - `ConfettiOverlay` plays a one-shot falling-confetti burst when the game ends. Unlike the other overlays it isn't driven by game-tick or event state — RuneLite calls `render()` once per client frame with no fixed interval, so it steps its own particle simulation using a measured wall-clock delta each frame, and dedupes the spawn to once per celebration via the plugin's `confettiUntil` timestamp.
 
 - **`GnomeballConfig`** — user-facing toggles (show player overlay, show tile overlay) via RuneLite's standard config system.
 
