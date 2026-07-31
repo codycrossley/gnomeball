@@ -101,7 +101,7 @@ public class GnomeballPlugin extends Plugin
     private ConfettiOverlay confettiOverlay;
 
     private ApiClient apiClient;
-    private EventPoller poller;
+    private EventSocket eventSocket;
     private RosterReducer rosterReducer;
     private TileReducer tileReducer;
 
@@ -112,14 +112,17 @@ public class GnomeballPlugin extends Plugin
         return t;
     });
 
-    private final ScheduledExecutorService heartbeatScheduler = Executors.newSingleThreadScheduledExecutor(r ->
+    // Used only for the throttled roster-refresh below now -- heartbeat and
+    // the periodic 30s roster poll were removed when events moved from
+    // polling to WebSocket push (see EventSocket); online status derives
+    // from WS connection lifecycle server-side instead, and roster-changing
+    // events arrive live instead of up to 30s stale.
+    private final ScheduledExecutorService rosterThrottleScheduler = Executors.newSingleThreadScheduledExecutor(r ->
     {
-        Thread t = new Thread(r, "gnomeball-heartbeat");
+        Thread t = new Thread(r, "gnomeball-roster-throttle");
         t.setDaemon(true);
         return t;
     });
-    private volatile ScheduledFuture<?> heartbeatFuture = null;
-    private volatile ScheduledFuture<?> onlineRefreshFuture = null;
 
     // Throttles roster refetches triggered by PLAYER_JOINED/ROLE_ASSIGNED/PLAYER_LEFT events.
     // A poll batch can contain several such events at once, and at scale (many clients, players
@@ -225,10 +228,10 @@ public class GnomeballPlugin extends Plugin
         overlayManager.add(tileOverlay);
         overlayManager.add(confettiOverlay);
 
-        poller = new EventPoller(apiClient, new EventPoller.Listener()
+        eventSocket = new EventSocket(okHttpClient, gson, new EventListener()
         {
             @Override public void onEvent(ApiClient.EventOut e) { handleEvent(e); }
-            @Override public void onError(Exception e) { log.debug("Poll error: {}", e.getMessage()); }
+            @Override public void onError(Exception e) { log.debug("WS error: {}", e.getMessage()); }
         });
 
         if (client.getGameState() == GameState.LOGGED_IN)
@@ -245,8 +248,8 @@ public class GnomeballPlugin extends Plugin
     protected void shutDown()
     {
         stopPeriodicTasks();
-        heartbeatScheduler.shutdownNow();
-        if (poller != null) poller.shutdown();
+        rosterThrottleScheduler.shutdownNow();
+        if (eventSocket != null) eventSocket.shutdown();
         executor.shutdownNow();
         if (playerOverlay != null) overlayManager.remove(playerOverlay);
         if (timerOverlay != null) overlayManager.remove(timerOverlay);
@@ -271,7 +274,7 @@ public class GnomeballPlugin extends Plugin
     {
         if (event.getGameState() == GameState.LOGGED_IN)
         {
-            if (!poller.isRunning())
+            if (!eventSocket.isRunning())
             {
                 String savedId = configManager.getRSProfileConfiguration(CONFIG_GROUP, KEY_GAME_ID, String.class);
                 if (savedId != null && !savedId.isBlank())
@@ -287,7 +290,7 @@ public class GnomeballPlugin extends Plugin
         if (event.getGameState() == GameState.LOGIN_SCREEN
             || event.getGameState() == GameState.HOPPING)
         {
-            poller.stop();
+            eventSocket.stop();
             stopPeriodicTasks();
             gameId = null; writeKey = null; joinCode = null; hostRsn = null;
             phase = GamePhase.DISCONNECTED; deadlineMs = 0; winner = null;
@@ -927,7 +930,7 @@ public class GnomeballPlugin extends Plugin
                 phase = GamePhase.ENDED;
                 if (e.payload != null) winner = safeStr(e.payload, "winner");
                 clearSession();
-                poller.stop();
+                eventSocket.stop();
                 stopPeriodicTasks();
                 break;
             }
@@ -1207,7 +1210,7 @@ public class GnomeballPlugin extends Plugin
             return;
         }
         if (pendingRosterRefresh != null && !pendingRosterRefresh.isDone()) return;
-        pendingRosterRefresh = heartbeatScheduler.schedule(
+        pendingRosterRefresh = rosterThrottleScheduler.schedule(
             this::refreshRosterNow, ROSTER_REFRESH_THROTTLE_MS - elapsed, TimeUnit.MILLISECONDS);
     }
 
@@ -1300,8 +1303,7 @@ public class GnomeballPlugin extends Plugin
                 phase    = GamePhase.LOBBY;
                 rememberHostKey(gameId, writeKey);
                 saveSession();
-                poller.start(gameId);
-                startPeriodicTasks();
+                eventSocket.start(gameId, rsn);
                 SwingUtilities.invokeLater(() -> panel.refresh());
             }
             catch (Exception ex) { log.warn("Create game failed: {}", ex.getMessage()); }
@@ -1333,8 +1335,7 @@ public class GnomeballPlugin extends Plugin
                 syncGameState(snap);
                 loadTiles();
                 saveSession();
-                poller.start(gameId, snap.latestSeq);
-                startPeriodicTasks();
+                eventSocket.start(gameId, snap.latestSeq, rsn);
                 SwingUtilities.invokeLater(() -> panel.refresh());
             }
             catch (Exception ex) { log.warn("Join game failed: {}", ex.getMessage()); }
@@ -1365,7 +1366,7 @@ public class GnomeballPlugin extends Plugin
     {
         final String gid = gameId;
         final String rsn = localRsn();
-        poller.stop();
+        eventSocket.stop();
         stopPeriodicTasks();
         resetState();
         SwingUtilities.invokeLater(() -> panel.refresh());
@@ -1807,8 +1808,7 @@ public class GnomeballPlugin extends Plugin
                 try { deadlineMs = savedDeadlineStr != null ? Long.parseLong(savedDeadlineStr) : 0; }
                 catch (NumberFormatException ignored) { deadlineMs = 0; }
 
-                poller.start(savedGameId, snap.latestSeq);
-                startPeriodicTasks();
+                eventSocket.start(savedGameId, snap.latestSeq, localRsn());
                 log.debug("Resumed gnomeball game {}", savedGameId);
                 SwingUtilities.invokeLater(() -> panel.refresh());
             }
@@ -1822,39 +1822,11 @@ public class GnomeballPlugin extends Plugin
     }
 
     // -------------------------------------------------------------------------
-    // Periodic tasks (heartbeat + online refresh)
+    // Periodic tasks (throttled roster refresh only -- see rosterThrottleScheduler)
     // -------------------------------------------------------------------------
-
-    private void startPeriodicTasks()
-    {
-        stopPeriodicTasks();
-        heartbeatFuture = heartbeatScheduler.scheduleAtFixedRate(() ->
-        {
-            final String gid = gameId;
-            final String rsn = localRsn();
-            if (gid == null || rsn == null) return;
-            try { apiClient.sendHeartbeat(gid, rsn); }
-            catch (Exception ex) { log.debug("Heartbeat failed: {}", ex.getMessage()); }
-        }, 0, 15, TimeUnit.SECONDS);
-
-        onlineRefreshFuture = heartbeatScheduler.scheduleAtFixedRate(() ->
-        {
-            final String gid = gameId;
-            if (gid == null) return;
-            try
-            {
-                ApiClient.RosterSnapshot snap = apiClient.fetchRoster(gid);
-                syncGameState(snap);
-                SwingUtilities.invokeLater(() -> panel.refresh());
-            }
-            catch (Exception ex) { log.debug("Online refresh failed: {}", ex.getMessage()); }
-        }, 30, 30, TimeUnit.SECONDS);
-    }
 
     private void stopPeriodicTasks()
     {
-        if (heartbeatFuture != null)   { heartbeatFuture.cancel(false);   heartbeatFuture = null; }
-        if (onlineRefreshFuture != null) { onlineRefreshFuture.cancel(false); onlineRefreshFuture = null; }
         if (pendingRosterRefresh != null) { pendingRosterRefresh.cancel(false); pendingRosterRefresh = null; }
     }
 
