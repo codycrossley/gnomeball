@@ -17,7 +17,7 @@ import java.util.Set;
 
 public class TileOverlay extends Overlay
 {
-    private static final Color COLOR_STANDARD = new Color(255, 255, 0);
+    private static final Color COLOR_UNKNOWN_TYPE = new Color(255, 255, 0); // fallback for any tile type not explicitly recognized below
     private static final Color COLOR_FIELD    = new Color(255, 255, 255);
     private static final Color COLOR_ZONE_A   = new Color(60, 120, 220);
     private static final Color COLOR_ZONE_B   = new Color(200, 60, 60);
@@ -26,11 +26,9 @@ public class TileOverlay extends Overlay
 
     /** Types whose committed tiles render as a connected-region outline (edges only), rather than
      * each tile individually filled — these tend to cover large areas, and filling every tile
-     * solid reads as an overwhelming wash of color. STANDARD is excluded: it's meant for sparse
-     * individual markers, where a filled single tile is the clearer signal. Order matters: drawn
-     * in this sequence, so a zone edge coinciding with a field edge (e.g. a zone tile sitting
-     * right at the field's outer boundary) draws on top and wins — zones take rendering priority
-     * over the field they sit on. */
+     * solid reads as an overwhelming wash of color. Order matters: drawn in this sequence, so a
+     * zone edge coinciding with a field edge (e.g. a zone tile sitting right at the field's outer
+     * boundary) draws on top and wins — zones take rendering priority over the field they sit on. */
     private static final List<String> OUTLINE_TYPES = List.of("FIELD", "ZONE_A", "ZONE_B");
 
     private static final Stroke SOLID_STROKE   = new BasicStroke(2f);
@@ -63,11 +61,6 @@ public class TileOverlay extends Overlay
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
         renderCommittedTiles(g);
-
-        if (plugin.isZoneMode())
-        {
-            renderZonePreview(g);
-        }
 
         if (plugin.isPresetPlacementMode() || plugin.isPresetRemovalMode())
         {
@@ -127,15 +120,6 @@ public class TileOverlay extends Overlay
         return withAlpha(COLOR_OUT_OF_BOUNDS_FLASH, alpha);
     }
 
-    private void renderZonePreview(Graphics2D g)
-    {
-        Set<WorldPoint> tiles = plugin.getZoneTiles();
-        if (tiles.isEmpty()) return;
-
-        Color base = "TEAM_A".equals(plugin.getZoneTeam()) ? COLOR_ZONE_A : COLOR_ZONE_B;
-        renderOutline(g, tiles, tiles, withAlpha(base, 220), PREVIEW_STROKE);
-    }
-
     private void renderPresetPreview(Graphics2D g)
     {
         FieldPreset preset = plugin.getSelectedPreset();
@@ -149,11 +133,14 @@ public class TileOverlay extends Overlay
 
         List<FieldPreset.PlacedTile> placed = preset.layout(center, plugin.getPresetRotationSteps());
 
-        // Non-outline types (e.g. a saved custom slot can include STANDARD tiles) render
-        // individually filled, same as the committed-tile split in renderCommittedTiles.
+        // Non-outline types render individually filled, same as the committed-tile split in
+        // renderCommittedTiles -- and, same as there, Cheerleader tiles are skipped here too
+        // (rendered as a real 3D model by CheerleaderRenderer instead), so a saved custom slot
+        // that happens to include one doesn't preview as both a filled tile and a model at once.
         for (FieldPreset.PlacedTile pt : placed)
         {
             if (OUTLINE_TYPES.contains(pt.tileType)) continue;
+            if ("CHEERLEADER_A".equals(pt.tileType) || "CHEERLEADER_B".equals(pt.tileType)) continue;
             Color base = removal ? new Color(255, 60, 60) : resolveColor(pt.color, pt.tileType);
             renderFilledTile(g, pt.point, withAlpha(base, 50), withAlpha(base, 220), PREVIEW_STROKE);
         }
@@ -271,7 +258,7 @@ public class TileOverlay extends Overlay
         if ("FIELD".equals(tileType)) return COLOR_FIELD;
         if ("ZONE_A".equals(tileType)) return COLOR_ZONE_A;
         if ("ZONE_B".equals(tileType)) return COLOR_ZONE_B;
-        return COLOR_STANDARD;
+        return COLOR_UNKNOWN_TYPE;
     }
 
     private static Color resolveColor(String hex, String tileType)

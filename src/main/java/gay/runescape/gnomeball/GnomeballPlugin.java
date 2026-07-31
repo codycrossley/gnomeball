@@ -165,8 +165,6 @@ public class GnomeballPlugin extends Plugin
     private volatile FieldPreset selectedPreset = null;
     private volatile int presetRotationSteps = 0; // quarter-turns clockwise: 0/1/2/3 = 0/90/180/270 degrees
     private final FieldPreset[] customSlots = new FieldPreset[CUSTOM_SLOT_COUNT]; // null = empty slot
-    private volatile String zoneTeam = null; // "TEAM_A" or "TEAM_B"
-    private final Set<WorldPoint> zoneTiles = new HashSet<>();
     private volatile WorldPoint lastSelfPosition = null;
     private volatile String ballHolder   = null;
     private volatile String tagObligationTagger = null;
@@ -328,11 +326,6 @@ public class GnomeballPlugin extends Plugin
             if (presetPlacementMode || presetRemovalMode)
             {
                 addPresetMenuEntries();
-                return;
-            }
-            if (zoneTeam != null)
-            {
-                addZoneMenuEntries();
                 return;
             }
             addTileMenuEntries(event);
@@ -675,67 +668,6 @@ public class GnomeballPlugin extends Plugin
         });
     }
 
-    private void addZoneMenuEntries()
-    {
-        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
-        if (tile == null) return;
-        WorldPoint wp = tile.getWorldLocation();
-        if (wp == null) return;
-
-        String teamLabel = "TEAM_A".equals(zoneTeam) ? teamAName : teamBName;
-        String teamColor = "TEAM_A".equals(zoneTeam) ? COLOR_TEAM_A : COLOR_TEAM_B;
-
-        client.createMenuEntry(-1)
-            .setOption("Cancel Zone")
-            .setTarget("")
-            .setType(MenuAction.RUNELITE)
-            .onClick(me -> cancelZoneMode());
-
-        if (!zoneTiles.isEmpty())
-        {
-            client.createMenuEntry(-1)
-                .setOption("<col=" + teamColor + ">Confirm " + teamLabel + " Zone (" + zoneTiles.size() + " tiles)</col>")
-                .setTarget("")
-                .setType(MenuAction.RUNELITE)
-                .onClick(me -> commitZone());
-        }
-
-        boolean alreadySelected = zoneTiles.contains(wp);
-        client.createMenuEntry(-1)
-            .setOption(alreadySelected ? "Remove Tile" : "<col=" + teamColor + ">Add Tile</col>")
-            .setTarget("")
-            .setType(MenuAction.RUNELITE)
-            .onClick(me ->
-            {
-                if (zoneTiles.contains(wp))
-                    zoneTiles.remove(wp);
-                else
-                    zoneTiles.add(wp);
-            });
-    }
-
-    private void commitZone()
-    {
-        if (!isHost() || gameId == null || zoneTeam == null || zoneTiles.isEmpty()) return;
-
-        String zoneType = "TEAM_A".equals(zoneTeam) ? "ZONE_A" : "ZONE_B";
-        Set<WorldPoint> tiles = new HashSet<>(zoneTiles);
-        cancelZoneMode();
-
-        executor.submit(() -> markZoneTiles(tiles, zoneType));
-    }
-
-    /** Marks every tile in an arbitrary tile set as the given zone type. Must be called from a
-     * background thread. Zone tiles render filled with their own type-based color — no separate
-     * boundary marking is needed. */
-    private void markZoneTiles(Set<WorldPoint> tiles, String zoneType)
-    {
-        for (WorldPoint wp : tiles)
-        {
-            try { apiClient.markTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), zoneType, null); }
-            catch (Exception ex) { log.warn("Zone tile mark failed at {},{}: {}", wp.getX(), wp.getY(), ex.getMessage()); }
-        }
-    }
 
     private void addPresetMenuEntries()
     {
@@ -858,10 +790,6 @@ public class GnomeballPlugin extends Plugin
             .setOption("Field")
             .setTarget("").setType(MenuAction.RUNELITE)
             .onClick(me -> toggleTile(wp, "FIELD"));
-        subMenu.createMenuEntry(-1)
-            .setOption("Standard")
-            .setTarget("").setType(MenuAction.RUNELITE)
-            .onClick(me -> toggleTile(wp, "STANDARD"));
         subMenu.createMenuEntry(-1)
             .setOption("<col=" + COLOR_TEAM_A + ">Cheerleader</col>")
             .setTarget("").setType(MenuAction.RUNELITE)
@@ -1454,7 +1382,7 @@ public class GnomeballPlugin extends Plugin
     }
 
     /** Removes every currently marked field/zone tile. A tile can carry more than one type at once
-     * (e.g. a STANDARD tile a host manually overlaid on a FIELD tile), so this unmarks by unique
+     * (e.g. a Cheerleader a host manually overlaid on a FIELD tile), so this unmarks by unique
      * (x,y,plane) with a null tileType, which the server treats as "remove everything here" —
      * one call per tile instead of one per (tile, type). */
     public void onClearArenaClicked()
@@ -1525,7 +1453,6 @@ public class GnomeballPlugin extends Plugin
     public void startPresetPlacement(FieldPreset preset)
     {
         if (preset == null || preset.isEmpty()) return;
-        cancelZoneMode();
         selectedPreset = preset;
         presetPlacementMode = true;
         presetRemovalMode = false;
@@ -1535,7 +1462,6 @@ public class GnomeballPlugin extends Plugin
     public void startPresetRemoval(FieldPreset preset)
     {
         if (preset == null || preset.isEmpty()) return;
-        cancelZoneMode();
         selectedPreset = preset;
         presetRemovalMode = true;
         presetPlacementMode = false;
@@ -1641,10 +1567,6 @@ public class GnomeballPlugin extends Plugin
         hostedGameKeys.put(gid, key);
         configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_HOSTED_GAMES, gson.toJson(hostedGameKeys));
     }
-
-    public String        getZoneTeam()     { return zoneTeam; }
-    public Set<WorldPoint> getZoneTiles()  { return zoneTiles; }
-    public boolean       isZoneMode()      { return zoneTeam != null; }
 
     public long          getGoalFlashUntil()    { return goalFlashUntil; }
     public String        getGoalFlashTeam()     { return goalFlashTeam; }
@@ -1760,19 +1682,6 @@ public class GnomeballPlugin extends Plugin
             try { apiClient.setTimer(gid, rsn, remaining); }
             catch (Exception ex) { log.warn("Set timer failed: {}", ex.getMessage()); }
         });
-    }
-
-    public void startZoneMode(String team)
-    {
-        cancelPresetMode();
-        zoneTeam = team;
-        zoneTiles.clear();
-    }
-
-    public void cancelZoneMode()
-    {
-        zoneTeam = null;
-        zoneTiles.clear();
     }
 
     // -------------------------------------------------------------------------

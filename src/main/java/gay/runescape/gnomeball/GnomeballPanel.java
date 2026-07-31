@@ -60,10 +60,6 @@ public class GnomeballPanel extends PluginPanel
     private final JButton removePresetBtn = new JButton("Remove");
     private final JButton saveFieldBtn = new JButton("Save");
 
-    // Zones (host; shown whenever the host card is shown)
-    private final JPanel zonePanel = new JPanel();
-    private final JButton zoneABtn = new JButton("Team A Zone");
-    private final JButton zoneBBtn = new JButton("Team B Zone");
     private final JButton clearArenaBtn = new JButton("Clear Current Arena");
 
     // Host pre-start (LOBBY only, within host card)
@@ -429,52 +425,6 @@ public class GnomeballPanel extends PluginPanel
         hostControlsCard.add(presetPanel);
         hostControlsCard.add(Box.createVerticalStrut(8));
 
-        // Zones — shown whenever the host card is shown. Kept separate from Field Presets since
-        // zones are marked tile-by-tile per team rather than "placed" as a shape, and a
-        // Custom-Grid field has no endzones of its own, so this is how those get added.
-        JLabel zoneTitle = new JLabel("Zones");
-        zoneTitle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-        zoneTitle.setFont(FontManager.getRunescapeSmallFont());
-        zoneTitle.setAlignmentX(LEFT_ALIGNMENT);
-
-        zonePanel.setLayout(new BoxLayout(zonePanel, BoxLayout.Y_AXIS));
-        zonePanel.setBackground(new Color(34, 30, 26));
-        zonePanel.setAlignmentX(LEFT_ALIGNMENT);
-
-        JPanel zoneBtnRow = new JPanel(new GridLayout(1, 2, 4, 0));
-        zoneBtnRow.setBackground(new Color(34, 30, 26));
-        zoneBtnRow.setAlignmentX(LEFT_ALIGNMENT);
-        zoneBtnRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-
-        zoneABtn.setForeground(COLOR_TEAM_A);
-        zoneABtn.addActionListener(e ->
-        {
-            if (plugin.isZoneMode() && "TEAM_A".equals(plugin.getZoneTeam()))
-                plugin.cancelZoneMode();
-            else
-                plugin.startZoneMode("TEAM_A");
-            refreshGridButton();
-        });
-
-        zoneBBtn.setForeground(COLOR_TEAM_B);
-        zoneBBtn.addActionListener(e ->
-        {
-            if (plugin.isZoneMode() && "TEAM_B".equals(plugin.getZoneTeam()))
-                plugin.cancelZoneMode();
-            else
-                plugin.startZoneMode("TEAM_B");
-            refreshGridButton();
-        });
-
-        zoneBtnRow.add(zoneABtn);
-        zoneBtnRow.add(zoneBBtn);
-        zonePanel.add(zoneBtnRow);
-
-        hostControlsCard.add(zoneTitle);
-        hostControlsCard.add(Box.createVerticalStrut(4));
-        hostControlsCard.add(zonePanel);
-        hostControlsCard.add(Box.createVerticalStrut(8));
-
         // Clears everything from both Field Presets and Zones — applies to the whole arena, so
         // it lives below both rather than inside either sub-tool.
         clearArenaBtn.setForeground(new Color(220, 60, 60));
@@ -800,11 +750,6 @@ public class GnomeballPanel extends PluginPanel
     private void refreshGridButton()
     {
         gridSizeRow.setVisible(presetDropdown.getSelectedIndex() == CUSTOM_GRID_INDEX);
-
-        boolean inZoneA = plugin.isZoneMode() && "TEAM_A".equals(plugin.getZoneTeam());
-        boolean inZoneB = plugin.isZoneMode() && "TEAM_B".equals(plugin.getZoneTeam());
-        zoneABtn.setText(inZoneA ? "Cancel" : "Team A Zone");
-        zoneBBtn.setText(inZoneB ? "Cancel" : "Team B Zone");
 
         FieldPreset resolved = resolveSelectedPreset();
         boolean hasValidSelection = resolved != null && !resolved.isEmpty();

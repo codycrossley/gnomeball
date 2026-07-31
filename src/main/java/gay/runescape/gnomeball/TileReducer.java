@@ -37,7 +37,7 @@ public class TileReducer
             if (x == null || y == null || plane == null) return;
 
             String tileType = safeStr(e.payload, "tileType");
-            if (tileType == null) tileType = "STANDARD";
+            if (tileType == null) return; // server always requires/validates a real tileType
             String color = safeStr(e.payload, "color");
 
             tiles.put(key(x, y, plane, tileType),
@@ -69,10 +69,9 @@ public class TileReducer
         if (tileList == null) return;
         for (ApiClient.TileOut t : tileList)
         {
-            if (t == null) continue;
-            String tt = t.tileType != null ? t.tileType : "STANDARD";
-            tiles.put(key(t.x, t.y, t.plane, tt),
-                new TileEntry(new WorldPoint(t.x, t.y, t.plane), tt, t.color));
+            if (t == null || t.tileType == null) continue; // server always requires/validates a real tileType
+            tiles.put(key(t.x, t.y, t.plane, t.tileType),
+                new TileEntry(new WorldPoint(t.x, t.y, t.plane), t.tileType, t.color));
         }
     }
 

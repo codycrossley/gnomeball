@@ -34,7 +34,7 @@ public final class FieldPreset
     /**
      * Rotates and translates this preset's tiles onto {@code center}, {@code rotationSteps}
      * quarter-turns clockwise (0-3: 0/90/180/270 degrees), via the standard clockwise transform
-     * (dx,dy) -> (dy,-dx). Every current tile type (STANDARD/FIELD/ZONE_A/ZONE_B) is
+     * (dx,dy) -> (dy,-dx). Every current tile type (FIELD/ZONE_A/ZONE_B/CHEERLEADER_A/CHEERLEADER_B) is
      * non-directional, so only position rotates — type and color pass through unchanged. This is
      * the single source of truth for preset geometry, used identically by the live placement
      * preview and the actual commit so they can never disagree.
