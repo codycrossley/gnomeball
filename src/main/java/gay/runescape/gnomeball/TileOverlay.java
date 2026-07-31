@@ -83,6 +83,9 @@ public class TileOverlay extends Overlay
 
         for (TileReducer.TileEntry entry : entries)
         {
+            // Rendered as a real 3D NPC model by CheerleaderRenderer instead -- would otherwise
+            // double up as both a flat colored tile here and a model standing on top of it.
+            if ("CHEERLEADER_A".equals(entry.tileType) || "CHEERLEADER_B".equals(entry.tileType)) continue;
             if (OUTLINE_TYPES.contains(entry.tileType)) continue;
             Color base = resolveColor(entry.color, entry.tileType);
             renderFilledTile(g, entry.point, withAlpha(base, 60), withAlpha(base, 200), SOLID_STROKE);

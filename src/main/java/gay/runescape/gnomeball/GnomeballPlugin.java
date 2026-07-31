@@ -104,6 +104,7 @@ public class GnomeballPlugin extends Plugin
     private EventSocket eventSocket;
     private RosterReducer rosterReducer;
     private TileReducer tileReducer;
+    private CheerleaderRenderer cheerleaderRenderer;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r ->
     {
@@ -206,6 +207,7 @@ public class GnomeballPlugin extends Plugin
         apiClient     = new ApiClient(okHttpClient, gson);
         rosterReducer = new RosterReducer();
         tileReducer   = new TileReducer();
+        cheerleaderRenderer = new CheerleaderRenderer(client, clientThread);
         loadCustomFieldSlots();
         loadHostedGameKeys();
 
@@ -256,6 +258,7 @@ public class GnomeballPlugin extends Plugin
         if (tileOverlay != null) overlayManager.remove(tileOverlay);
         if (confettiOverlay != null) overlayManager.remove(confettiOverlay);
         if (navButton != null) clientToolbar.removeNavigation(navButton);
+        if (cheerleaderRenderer != null) cheerleaderRenderer.clear();
         resetState();
     }
 
@@ -306,6 +309,7 @@ public class GnomeballPlugin extends Plugin
             gameEndFlashUntil = 0; confettiUntil = 0; clockAtZero = false;
             if (rosterReducer != null) rosterReducer.reset();
             if (tileReducer != null) tileReducer.reset();
+            if (cheerleaderRenderer != null) cheerleaderRenderer.clear();
             SwingUtilities.invokeLater(() -> panel.refresh());
         }
     }
@@ -421,6 +425,11 @@ public class GnomeballPlugin extends Plugin
         lastSelfPosition = client.getLocalPlayer() != null ? client.getLocalPlayer().getWorldLocation() : null;
 
         checkClockExpiry();
+
+        if (phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE)
+        {
+            cheerleaderRenderer.sync(tileReducer.snapshot());
+        }
 
         if (phase != GamePhase.ACTIVE || timerPaused || ballHolder == null) return;
 
@@ -853,6 +862,14 @@ public class GnomeballPlugin extends Plugin
             .setOption("Standard")
             .setTarget("").setType(MenuAction.RUNELITE)
             .onClick(me -> toggleTile(wp, "STANDARD"));
+        subMenu.createMenuEntry(-1)
+            .setOption("<col=" + COLOR_TEAM_A + ">Cheerleader</col>")
+            .setTarget("").setType(MenuAction.RUNELITE)
+            .onClick(me -> toggleTile(wp, "CHEERLEADER_A"));
+        subMenu.createMenuEntry(-1)
+            .setOption("<col=" + COLOR_TEAM_B + ">Cheerleader</col>")
+            .setTarget("").setType(MenuAction.RUNELITE)
+            .onClick(me -> toggleTile(wp, "CHEERLEADER_B"));
     }
 
     private void toggleTile(WorldPoint wp, String tileType)
@@ -1856,6 +1873,7 @@ public class GnomeballPlugin extends Plugin
         gameEndFlashUntil = 0; confettiUntil = 0; clockAtZero = false;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
+        if (cheerleaderRenderer != null) cheerleaderRenderer.clear();
     }
 
     private void loadTiles()
