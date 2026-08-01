@@ -1,5 +1,6 @@
 package gay.runescape.gnomeball;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -30,13 +31,19 @@ import lombok.extern.slf4j.Slf4j;
  * purely cosmetic, and every client already receives these tiles the same way it receives
  * FIELD/ZONE_A/ZONE_B.
  *
- * Unlike TileOverlay, this isn't drawn via Graphics2D at all -- {@link RuneLiteObject} registers
- * directly into the client's own 3D scene graph, and the client's normal renderer draws it every
- * frame automatically once positioned and activated.
+ * Unlike TileOverlay, the model itself isn't drawn via Graphics2D at all -- {@link RuneLiteObject}
+ * registers directly into the client's own 3D scene graph, and the client's normal renderer draws
+ * it every frame automatically once positioned and activated. The occasional speech text above
+ * each cheerleader's head *is* Graphics2D though (see {@link CheerleaderSpeechOverlay}), since
+ * RuneLiteObject has no overhead-text capability of its own the way a real Actor does -- this
+ * class only tracks *what* each one is currently saying and until when; the overlay reads that
+ * state and draws it.
  *
  * Animation mimics the real NPC's own behavior, observed live via temporary debug logging: it
- * randomly picks from a pool of 8 distinct cheer animations (211-218). Deliberately does NOT
- * reproduce the real NPC's brief idle pauses between moves -- tried that two different ways (a
+ * originally cycled through a pool of 8 distinct cheer animations found that way (211-218), later
+ * narrowed down to just the 2 that looked best after visually inspecting all 8 in-game (see
+ * {@link #CHEER_ANIMATION_IDS}). Deliberately does NOT reproduce the real NPC's brief idle pauses
+ * between moves -- tried that two different ways (a
  * plain unassigned animation, and a clean {@code setActive(false)}) and both reliably read as the
  * whole model disappearing rather than it calmly standing still, since a RuneLiteObject has no
  * equivalent of a real actor's implicit idle stance to fall back on. Looping a single pick
@@ -46,24 +53,47 @@ import lombok.extern.slf4j.Slf4j;
 public class CheerleaderRenderer
 {
     private static final int NPC_ID_CHEERLEADER = 3158; // "Cheerleader" -- the real Gnome ball minigame NPC
-    private static final int[] CHEER_ANIMATION_IDS = {211, 212, 213, 214, 215, 216, 217, 218};
+    private static final int[] CHEER_ANIMATION_IDS = {211, 218}; // narrowed down from the full 211-218 pool by visual inspection
 
     private static final int RGB_TEAM_A = 0x3C78DC; // matches GnomeballPlugin.COLOR_TEAM_A
     private static final int RGB_TEAM_B = 0xC83C3C; // matches GnomeballPlugin.COLOR_TEAM_B
 
+    // Idle chatter: how often a cheerleader spontaneously shouts "Go <team>!" with no game event
+    // behind it, purely to look alive. Game-tick cadence (600ms) is plenty precise for deciding
+    // "start talking now" -- unlike the animation-completion problem earlier, this isn't racing a
+    // fast native completion signal, so there's no equivalent polling-rate issue here.
+    private static final int CHATTER_INTERVAL_MIN_MS = 6000;
+    private static final int CHATTER_INTERVAL_MAX_MS = 15000;
+    private static final long CHATTER_DURATION_MS = 2500;
+
+    // %s is the cheerleader's own team name; templates without one just ignore the extra arg
+    // (String.format tolerates unused trailing args).
+    private static final String[] CHATTER_TEMPLATES = {
+        "Go %s!",
+        "Let's go team!",
+        "You've got this, %s!",
+        "Bring it home!",
+        "We believe in you!",
+        "Woo, go %s!",
+        "Score one for %s!",
+        "Go go go!",
+    };
+
     private final Client client;
     private final ClientThread clientThread;
-    private final Map<String, RuneLiteObject> active = new HashMap<>();
+    private final GnomeballPlugin plugin;
+    private final Map<String, CheerInstance> active = new HashMap<>();
     private final Map<Integer, Animation> animationCache = new HashMap<>();
 
     private Model cachedModelA;
     private Model cachedModelB;
     private boolean modelLoadFailed;
 
-    public CheerleaderRenderer(Client client, ClientThread clientThread)
+    public CheerleaderRenderer(Client client, ClientThread clientThread, GnomeballPlugin plugin)
     {
         this.client = client;
         this.clientThread = clientThread;
+        this.plugin = plugin;
     }
 
     /** Must be called on the client thread (game-tick handlers already are). Reconciles the
@@ -71,7 +101,8 @@ public class CheerleaderRenderer
      * marked, called every tick rather than only on change -- a RuneLiteObject's LocalPoint is
      * relative to the currently loaded scene, and goes stale as the player walks across region
      * boundaries, so position needs re-asserting continuously the same way TileOverlay recomputes
-     * its own LocalPoint conversions fresh on every render rather than caching them. */
+     * its own LocalPoint conversions fresh on every render rather than caching them. Also rolls
+     * each cheerleader's idle-chatter timer forward (see {@link #updateChatter}). */
     public void sync(List<TileReducer.TileEntry> allTiles)
     {
         Map<String, TileReducer.TileEntry> wanted = new HashMap<>();
@@ -83,13 +114,13 @@ public class CheerleaderRenderer
             }
         }
 
-        Iterator<Map.Entry<String, RuneLiteObject>> it = active.entrySet().iterator();
+        Iterator<Map.Entry<String, CheerInstance>> it = active.entrySet().iterator();
         while (it.hasNext())
         {
-            Map.Entry<String, RuneLiteObject> e = it.next();
+            Map.Entry<String, CheerInstance> e = it.next();
             if (!wanted.containsKey(e.getKey()))
             {
-                e.getValue().setActive(false);
+                e.getValue().obj.setActive(false);
                 it.remove();
             }
         }
@@ -99,44 +130,110 @@ public class CheerleaderRenderer
         for (Map.Entry<String, TileReducer.TileEntry> e : wanted.entrySet())
         {
             TileReducer.TileEntry entry = e.getValue();
-            Model model = "CHEERLEADER_A".equals(entry.tileType) ? cachedModelA : cachedModelB;
+            String team = entry.tileType;
+            Model model = "CHEERLEADER_A".equals(team) ? cachedModelA : cachedModelB;
 
-            RuneLiteObject obj = active.computeIfAbsent(e.getKey(), k ->
+            CheerInstance inst = active.computeIfAbsent(e.getKey(), k ->
             {
                 RuneLiteObject o = client.createRuneLiteObject();
                 o.setModel(model);
-                return o;
+                return new CheerInstance(o, team);
             });
+            inst.point = entry.point;
 
             // computeIfAbsent's lambda only ever runs once per key, so if the animation resource
             // happened not to be loaded yet on that first tick, retry here on every subsequent
             // tick until it actually sticks, rather than leaving this cheerleader permanently
             // unanimated. A no-op once assignment has actually succeeded, since a looping
             // animation never clears itself back to null.
-            if (obj.getAnimation() == null) assignLoopingCheer(obj);
+            if (inst.obj.getAnimation() == null) assignLoopingCheer(inst);
 
             LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), entry.point);
             if (lp == null)
             {
-                obj.setActive(false);
+                inst.obj.setActive(false);
                 continue;
             }
-            obj.setLocation(lp, entry.point.getPlane());
-            obj.setActive(true);
+            inst.obj.setLocation(lp, entry.point.getPlane());
+            inst.obj.setActive(true);
+
+            updateChatter(inst);
+        }
+    }
+
+    /** Spontaneous chatter with no game event behind it, just to look alive -- a random pick from
+     * {@link #CHATTER_TEMPLATES} each time, so it's not the same line on repeat. Independent per
+     * cheerleader -- each one rolls its own next-chatter time -- so a group of them don't all
+     * shout in unison. */
+    private void updateChatter(CheerInstance inst)
+    {
+        long now = System.currentTimeMillis();
+        if (now < inst.nextChatterAtMs) return;
+
+        String teamName = "CHEERLEADER_A".equals(inst.team) ? plugin.getTeamAName() : plugin.getTeamBName();
+        String template = CHATTER_TEMPLATES[ThreadLocalRandom.current().nextInt(CHATTER_TEMPLATES.length)];
+        inst.speechText = String.format(template, teamName); // extra %s-less templates just ignore the arg
+        inst.speechExpiresAtMs = now + CHATTER_DURATION_MS;
+        inst.nextChatterAtMs = now + CHATTER_INTERVAL_MIN_MS
+            + ThreadLocalRandom.current().nextInt(CHATTER_INTERVAL_MAX_MS - CHATTER_INTERVAL_MIN_MS);
+    }
+
+    /** Makes every cheerleader on the given team say something for a few seconds, overriding
+     * whatever idle chatter they were (or weren't) already doing -- e.g. a "GOAL!" shout the
+     * instant that team scores. {@code team} is "TEAM_A"/"TEAM_B" (matching the game event
+     * payloads), translated internally to the "CHEERLEADER_A"/"CHEERLEADER_B" tile-type team each
+     * cheerleader was placed as. */
+    public void shout(String team, String text, long durationMs)
+    {
+        String cheerleaderTeam = "TEAM_A".equals(team) ? "CHEERLEADER_A" : "CHEERLEADER_B";
+        long expiresAt = System.currentTimeMillis() + durationMs;
+        for (CheerInstance inst : active.values())
+        {
+            if (!cheerleaderTeam.equals(inst.team)) continue;
+            inst.speechText = text;
+            inst.speechExpiresAtMs = expiresAt;
+        }
+    }
+
+    /** Read by {@link CheerleaderSpeechOverlay} every frame -- whatever's currently being said,
+     * for every cheerleader saying something right now. */
+    public List<SpeechBubble> getActiveSpeechBubbles()
+    {
+        long now = System.currentTimeMillis();
+        List<SpeechBubble> bubbles = new ArrayList<>();
+        for (CheerInstance inst : active.values())
+        {
+            if (inst.speechText != null && now < inst.speechExpiresAtMs)
+            {
+                bubbles.add(new SpeechBubble(inst.point, inst.speechText));
+            }
+        }
+        return bubbles;
+    }
+
+    public static final class SpeechBubble
+    {
+        public final WorldPoint point;
+        public final String text;
+
+        SpeechBubble(WorldPoint point, String text)
+        {
+            this.point = point;
+            this.text = text;
         }
     }
 
     /** Picks one random cheer animation and loops it continuously for this cheerleader's whole
      * lifetime. Different cheerleaders get visual variety since each one's pick is independently
      * randomized. */
-    private void assignLoopingCheer(RuneLiteObject obj)
+    private void assignLoopingCheer(CheerInstance inst)
     {
         int animId = CHEER_ANIMATION_IDS[ThreadLocalRandom.current().nextInt(CHEER_ANIMATION_IDS.length)];
         Animation anim = resolveAnimation(animId);
         if (anim == null) return; // not loaded yet -- caller will just get a static model this tick
 
-        obj.setAnimation(anim);
-        obj.setShouldLoop(true);
+        inst.obj.setAnimation(anim);
+        inst.obj.setShouldLoop(true);
     }
 
     /** Deactivates and forgets every currently-spawned cheerleader -- called on disconnect/leave/
@@ -148,7 +245,7 @@ public class CheerleaderRenderer
         // dispatch there itself rather than trust the caller's thread.
         clientThread.invoke(() ->
         {
-            for (RuneLiteObject obj : active.values()) obj.setActive(false);
+            for (CheerInstance inst : active.values()) inst.obj.setActive(false);
             active.clear();
         });
     }
@@ -236,5 +333,25 @@ public class CheerleaderRenderer
     private static String key(WorldPoint wp)
     {
         return wp.getX() + ":" + wp.getY() + ":" + wp.getPlane();
+    }
+
+    private static final class CheerInstance
+    {
+        final RuneLiteObject obj;
+        final String team; // "CHEERLEADER_A" or "CHEERLEADER_B"
+        WorldPoint point;
+        String speechText;
+        long speechExpiresAtMs;
+        long nextChatterAtMs;
+
+        CheerInstance(RuneLiteObject obj, String team)
+        {
+            this.obj = obj;
+            this.team = team;
+            // Staggers each cheerleader's first spontaneous line so a group placed at once
+            // doesn't all shout together.
+            this.nextChatterAtMs = System.currentTimeMillis()
+                + ThreadLocalRandom.current().nextInt(CHATTER_INTERVAL_MAX_MS);
+        }
     }
 }

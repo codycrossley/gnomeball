@@ -99,6 +99,7 @@ public class GnomeballPlugin extends Plugin
     private TimerOverlay timerOverlay;
     private TileOverlay tileOverlay;
     private ConfettiOverlay confettiOverlay;
+    private CheerleaderSpeechOverlay cheerleaderSpeechOverlay;
 
     private ApiClient apiClient;
     private EventSocket eventSocket;
@@ -205,7 +206,7 @@ public class GnomeballPlugin extends Plugin
         apiClient     = new ApiClient(okHttpClient, gson);
         rosterReducer = new RosterReducer();
         tileReducer   = new TileReducer();
-        cheerleaderRenderer = new CheerleaderRenderer(client, clientThread);
+        cheerleaderRenderer = new CheerleaderRenderer(client, clientThread, this);
         loadCustomFieldSlots();
         loadHostedGameKeys();
 
@@ -223,10 +224,12 @@ public class GnomeballPlugin extends Plugin
         timerOverlay = new TimerOverlay(client, this);
         tileOverlay = new TileOverlay(client, config, this, tileReducer);
         confettiOverlay = new ConfettiOverlay(client, this);
+        cheerleaderSpeechOverlay = new CheerleaderSpeechOverlay(client, this, cheerleaderRenderer);
         overlayManager.add(playerOverlay);
         overlayManager.add(timerOverlay);
         overlayManager.add(tileOverlay);
         overlayManager.add(confettiOverlay);
+        overlayManager.add(cheerleaderSpeechOverlay);
 
         eventSocket = new EventSocket(okHttpClient, gson, new EventListener()
         {
@@ -255,6 +258,7 @@ public class GnomeballPlugin extends Plugin
         if (timerOverlay != null) overlayManager.remove(timerOverlay);
         if (tileOverlay != null) overlayManager.remove(tileOverlay);
         if (confettiOverlay != null) overlayManager.remove(confettiOverlay);
+        if (cheerleaderSpeechOverlay != null) overlayManager.remove(cheerleaderSpeechOverlay);
         if (navButton != null) clientToolbar.removeNavigation(navButton);
         if (cheerleaderRenderer != null) cheerleaderRenderer.clear();
         resetState();
@@ -939,6 +943,7 @@ public class GnomeballPlugin extends Plugin
                 obligationActive = true;
                 obligationTeam = team;
                 obligationKind = "GOAL";
+                if (team != null) cheerleaderRenderer.shout(team, "GOAL!", 3000);
                 break;
             }
             case "OUT_OF_BOUNDS":
