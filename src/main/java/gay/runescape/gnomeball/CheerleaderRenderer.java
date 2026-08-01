@@ -18,7 +18,6 @@ import net.runelite.api.RuneLiteObject;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.callback.ClientThread;
-import lombok.extern.slf4j.Slf4j;
 
 /** Spawns a decorative Gnome cheerleader (NPC 3158) -- a real 3D model, not a 2D overlay -- at
  * every tile the host has marked with the "CHEERLEADER_A" or "CHEERLEADER_B" tile type, recolored
@@ -49,7 +48,6 @@ import lombok.extern.slf4j.Slf4j;
  * equivalent of a real actor's implicit idle stance to fall back on. Looping a single pick
  * continuously for each cheerleader's whole lifetime sidesteps that entirely; variety comes from
  * different cheerleaders independently rolling different picks instead. */
-@Slf4j
 public class CheerleaderRenderer
 {
     private static final int NPC_ID_CHEERLEADER = 3158; // "Cheerleader" -- the real Gnome ball minigame NPC
@@ -273,9 +271,8 @@ public class CheerleaderRenderer
             cachedModelA = buildHueShiftedModel(modelIds, RGB_TEAM_A);
             cachedModelB = buildHueShiftedModel(modelIds, RGB_TEAM_B);
         }
-        catch (Exception ex)
+        catch (Exception ignored)
         {
-            log.warn("Failed to build cheerleader models: {}", ex.getMessage());
             modelLoadFailed = true;
             return false;
         }

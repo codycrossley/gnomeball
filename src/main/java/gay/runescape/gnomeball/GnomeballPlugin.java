@@ -19,7 +19,6 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Actor;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
@@ -53,7 +52,6 @@ import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
 import okhttp3.OkHttpClient;
 
-@Slf4j
 @PluginDescriptor(name = "Gnomeball")
 public class GnomeballPlugin extends Plugin
 {
@@ -234,7 +232,7 @@ public class GnomeballPlugin extends Plugin
         eventSocket = new EventSocket(okHttpClient, gson, new EventListener()
         {
             @Override public void onEvent(ApiClient.EventOut e) { handleEvent(e); }
-            @Override public void onError(Exception e) { log.debug("WS error: {}", e.getMessage()); }
+            @Override public void onError(Exception e) { }
         });
 
         if (client.getGameState() == GameState.LOGGED_IN)
@@ -486,7 +484,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.zoneGoal(gid, rsn); }
-            catch (Exception ex) { log.warn("Zone goal failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -506,7 +504,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.outOfBounds(gid, rsn); }
-            catch (Exception ex) { log.warn("Out of bounds report failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -538,47 +536,25 @@ public class GnomeballPlugin extends Plugin
     {
         if (phase != GamePhase.ACTIVE) return;
 
-        if (event.getMenuEntry().getActor() instanceof Player)
-        {
-            log.debug("Player-targeted menu click: action={} option={} target={}",
-                event.getMenuAction(), event.getMenuOption(), event.getMenuTarget());
-        }
-
         if (event.getMenuAction() != MenuAction.WIDGET_TARGET_ON_PLAYER) return;
 
         String localRsn = localRsn();
         if (localRsn == null) return;
 
         // Must currently hold the ball
-        if (ballHolder == null || !ballHolder.equalsIgnoreCase(localRsn))
-        {
-            log.debug("Pass blocked: not ball holder (ballHolder={}, self={})", ballHolder, localRsn);
-            return;
-        }
+        if (ballHolder == null || !ballHolder.equalsIgnoreCase(localRsn)) return;
 
         // Must be an enlisted team player
         GnomeballRole myRole = rosterReducer.getRole(localRsn);
-        if (myRole != GnomeballRole.TEAM_A && myRole != GnomeballRole.TEAM_B)
-        {
-            log.debug("Pass blocked: sender role is {}", myRole);
-            return;
-        }
+        if (myRole != GnomeballRole.TEAM_A && myRole != GnomeballRole.TEAM_B) return;
 
         // Must be throwing a gnomeball (or the F2P-friendly Peaceful handegg)
         ItemContainer inv = client.getItemContainer(InventoryID.INVENTORY);
         if (inv == null) return;
         Item item = inv.getItem(event.getParam0());
-        if (item == null)
-        {
-            log.debug("Pass blocked: no item at inventory slot {}", event.getParam0());
-            return;
-        }
+        if (item == null) return;
         int itemId = item.getId();
-        if (itemId != GNOMEBALL_ITEM_ID && itemId != PEACEFUL_HANDEGG_ITEM_ID)
-        {
-            log.debug("Pass blocked: item id {} is not a gnomeball/handegg", itemId);
-            return;
-        }
+        if (itemId != GNOMEBALL_ITEM_ID && itemId != PEACEFUL_HANDEGG_ITEM_ID) return;
 
         // Target must have a free weapon slot
         if (!(event.getMenuEntry().getActor() instanceof Player)) return;
@@ -588,17 +564,11 @@ public class GnomeballPlugin extends Plugin
         PlayerComposition comp = target.getPlayerComposition();
         if (comp == null) return;
         int[] equipIds = comp.getEquipmentIds();
-        if (equipIds == null || equipIds[KitType.WEAPON.getIndex()] != 0)
-        {
-            log.debug("Pass blocked: target weapon slot not free (raw id={})",
-                equipIds != null ? equipIds[KitType.WEAPON.getIndex()] : "null-array");
-            return;
-        }
+        if (equipIds == null || equipIds[KitType.WEAPON.getIndex()] != 0) return;
 
         String targetRsn = Text.toJagexName(target.getName());
         if (targetRsn == null || targetRsn.isBlank()) return;
 
-        log.debug("Gnomeball pass: {} -> {}", localRsn, targetRsn);
         onPassBallClicked(targetRsn);
     }
 
@@ -664,11 +634,10 @@ public class GnomeballPlugin extends Plugin
         final String self = selfRsn;
         final String tagger = attackerRsn;
 
-        log.debug("Whack tag: {} -> {} (anim={}, weapon={})", tagger, self, actor.getAnimation(), weaponId);
         executor.submit(() ->
         {
             try { apiClient.tagPlayer(gid, tagger, self); }
-            catch (Exception ex) { log.debug("Tag report failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -728,7 +697,7 @@ public class GnomeballPlugin extends Plugin
             for (FieldPreset.PlacedTile pt : placedTiles)
             {
                 try { apiClient.markTile(gameId, writeKey, pt.point.getX(), pt.point.getY(), pt.point.getPlane(), pt.tileType, pt.color); }
-                catch (Exception ex) { log.warn("Commit preset tile failed at {},{}: {}", pt.point.getX(), pt.point.getY(), ex.getMessage()); }
+                catch (Exception ignored) { }
             }
         });
     }
@@ -753,7 +722,7 @@ public class GnomeballPlugin extends Plugin
             for (WorldPoint wp : uniquePoints)
             {
                 try { apiClient.unmarkTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), null); }
-                catch (Exception ex) { log.warn("Remove preset tile failed at {},{}: {}", wp.getX(), wp.getY(), ex.getMessage()); }
+                catch (Exception ignored) { }
             }
         });
     }
@@ -822,7 +791,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.markTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), tileType, null); }
-            catch (Exception ex) { log.warn("Mark tile failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -832,7 +801,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.unmarkTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), tileType); }
-            catch (Exception ex) { log.warn("Unmark tile failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1177,7 +1146,7 @@ public class GnomeballPlugin extends Plugin
                 syncGameState(snap);
                 SwingUtilities.invokeLater(() -> panel.refresh());
             }
-            catch (Exception ex) { log.debug("Roster refresh failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1239,7 +1208,7 @@ public class GnomeballPlugin extends Plugin
     public void onCreateClicked()
     {
         String rsn = localRsn();
-        if (rsn == null) { log.debug("Cannot create game: not logged in"); return; }
+        if (rsn == null) return;
 
         executor.submit(() ->
         {
@@ -1256,7 +1225,7 @@ public class GnomeballPlugin extends Plugin
                 eventSocket.start(gameId, rsn);
                 SwingUtilities.invokeLater(() -> panel.refresh());
             }
-            catch (Exception ex) { log.warn("Create game failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1288,7 +1257,7 @@ public class GnomeballPlugin extends Plugin
                 eventSocket.start(gameId, snap.latestSeq, rsn);
                 SwingUtilities.invokeLater(() -> panel.refresh());
             }
-            catch (Exception ex) { log.warn("Join game failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1298,7 +1267,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.startGame(gameId, writeKey, durationSeconds); }
-            catch (Exception ex) { log.warn("Start game failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1308,7 +1277,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.endGame(gameId, writeKey); }
-            catch (Exception ex) { log.warn("End game failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1326,7 +1295,7 @@ public class GnomeballPlugin extends Plugin
             executor.submit(() ->
             {
                 try { apiClient.leaveGame(gid, rsn); }
-                catch (Exception ex) { log.debug("Leave game failed: {}", ex.getMessage()); }
+                catch (Exception ignored) { }
             });
         }
     }
@@ -1337,7 +1306,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.renameTeam(gameId, writeKey, team, name); }
-            catch (Exception ex) { log.warn("Rename team failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1347,7 +1316,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.updateScore(gameId, writeKey, team, score); }
-            catch (Exception ex) { log.warn("Update score failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1362,7 +1331,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.broadcastMessage(gameId, rsn, trimmed); }
-            catch (Exception ex) { log.warn("Broadcast message failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1374,7 +1343,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.passBall(gid, rsn, targetRsn); }
-            catch (Exception ex) { log.warn("Pass ball failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1384,7 +1353,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.clearBall(gameId, writeKey); }
-            catch (Exception ex) { log.warn("Clear ball failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1410,7 +1379,7 @@ public class GnomeballPlugin extends Plugin
             for (WorldPoint wp : uniquePoints)
             {
                 try { apiClient.unmarkTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), null); }
-                catch (Exception ex) { log.warn("Clear arena tile failed at {},{}: {}", wp.getX(), wp.getY(), ex.getMessage()); }
+                catch (Exception ignored) { }
             }
         });
         addChatMessage("Clearing current arena.");
@@ -1422,7 +1391,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.assignBall(gameId, writeKey, playerRsn); }
-            catch (Exception ex) { log.warn("Assign ball failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1432,7 +1401,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.assignRole(gameId, writeKey, playerRsn, role); }
-            catch (Exception ex) { log.warn("Assign role failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1542,7 +1511,7 @@ public class GnomeballPlugin extends Plugin
                 }
             }
         }
-        catch (Exception ex) { log.warn("Failed to load custom field slots: {}", ex.getMessage()); }
+        catch (Exception ignored) { }
     }
 
     private void persistCustomFieldSlots()
@@ -1565,7 +1534,7 @@ public class GnomeballPlugin extends Plugin
             Map<String, String> saved = gson.fromJson(json, type);
             if (saved != null) hostedGameKeys.putAll(saved);
         }
-        catch (Exception ex) { log.warn("Failed to load hosted game keys: {}", ex.getMessage()); }
+        catch (Exception ignored) { }
     }
 
     private void rememberHostKey(String gid, String key)
@@ -1623,7 +1592,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.blowWhistle(gid, rsn, remaining); }
-            catch (Exception ex) { log.warn("Blow whistle failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1643,7 +1612,7 @@ public class GnomeballPlugin extends Plugin
             executor.submit(() ->
             {
                 try { apiClient.resumeTimer(gid, rsn); }
-                catch (Exception ex) { log.warn("Resume timer failed: {}", ex.getMessage()); }
+                catch (Exception ignored) { }
             });
         }
         else
@@ -1657,7 +1626,7 @@ public class GnomeballPlugin extends Plugin
             executor.submit(() ->
             {
                 try { apiClient.pauseTimer(gid, rsn, remaining); }
-                catch (Exception ex) { log.warn("Pause timer failed: {}", ex.getMessage()); }
+                catch (Exception ignored) { }
             });
         }
     }
@@ -1687,7 +1656,7 @@ public class GnomeballPlugin extends Plugin
         executor.submit(() ->
         {
             try { apiClient.setTimer(gid, rsn, remaining); }
-            catch (Exception ex) { log.warn("Set timer failed: {}", ex.getMessage()); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -1742,12 +1711,10 @@ public class GnomeballPlugin extends Plugin
                 catch (NumberFormatException ignored) { deadlineMs = 0; }
 
                 eventSocket.start(savedGameId, snap.latestSeq, localRsn());
-                log.debug("Resumed gnomeball game {}", savedGameId);
                 SwingUtilities.invokeLater(() -> panel.refresh());
             }
-            catch (Exception ex)
+            catch (Exception ignored)
             {
-                log.debug("Failed to resume game {}: {}", savedGameId, ex.getMessage());
                 clearSession();
                 SwingUtilities.invokeLater(() -> panel.refresh());
             }
@@ -1801,7 +1768,7 @@ public class GnomeballPlugin extends Plugin
             ApiClient.TilesResponse resp = apiClient.fetchTiles(gid);
             tileReducer.loadAll(resp.tiles);
         }
-        catch (Exception ex) { log.debug("Load tiles failed: {}", ex.getMessage()); }
+        catch (Exception ignored) { }
     }
 
     private static String safeStr(com.google.gson.JsonObject o, String key)

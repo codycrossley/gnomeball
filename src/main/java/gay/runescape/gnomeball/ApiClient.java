@@ -2,15 +2,12 @@ package gay.runescape.gnomeball;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
-
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-@Slf4j
 public class ApiClient
 {
     //static final String BASE_URL = "https://gnomeball.runescape.gay/gnomeball";

@@ -1,7 +1,6 @@
 package gay.runescape.gnomeball;
 
 import com.google.gson.Gson;
-import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
 
 import java.net.URLEncoder;
@@ -20,7 +19,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  * exponential backoff would produce a synchronized reconnect wave from
  * every client at the same moment.
  */
-@Slf4j
 public class EventSocket
 {
     private static final long MAX_BACKOFF_MS = 30_000;
@@ -148,7 +146,6 @@ public class EventSocket
             int attempt = reconnectAttempt.getAndIncrement();
             long cap = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * (1L << Math.min(attempt, 20)));
             long delay = ThreadLocalRandom.current().nextLong(0, cap + 1);
-            log.debug("Scheduling WS reconnect attempt {} in {}ms", attempt + 1, delay);
 
             reconnectTask = reconnectExec.schedule(this::connect, delay, TimeUnit.MILLISECONDS);
         }
