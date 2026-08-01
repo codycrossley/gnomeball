@@ -42,7 +42,7 @@ public class ApiClient
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Create game failed (" + resp.code() + "): " + raw);
             CreateGameResponse parsed = gson.fromJson(raw, CreateGameResponse.class);
-            return new CreateGameResult(parsed.gameId, parsed.joinCode, parsed.writeKey);
+            return new CreateGameResult(parsed.gameId, parsed.joinCode, parsed.writeKey, parsed.playerToken);
         }
     }
 
@@ -56,7 +56,7 @@ public class ApiClient
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Join failed (" + resp.code() + "): " + raw);
             JoinResponse parsed = gson.fromJson(raw, JoinResponse.class);
-            return new JoinResult(parsed.gameId, parsed.host);
+            return new JoinResult(parsed.gameId, parsed.host, parsed.playerToken);
         }
     }
 
@@ -81,62 +81,68 @@ public class ApiClient
         }
     }
 
-    public void leaveGame(String gameId, String playerRsn) throws IOException
+    public void leaveGame(String gameId, String playerRsn, String playerToken) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
 
-        try (Response resp = post("/v1/games/" + gameId + "/leave", body, null))
+        try (Response resp = post("/v1/games/" + gameId + "/leave", body, playerToken))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Leave failed (" + resp.code() + "): " + raw);
         }
     }
 
-    public void passBall(String gameId, String fromRsn, String toRsn) throws IOException
+    public void passBall(String gameId, String fromRsn, String toRsn, String playerToken) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", fromRsn);
         body.addProperty("target", toRsn);
 
-        try (Response resp = post("/v1/games/" + gameId + "/pass-ball", body, null))
+        try (Response resp = post("/v1/games/" + gameId + "/pass-ball", body, playerToken))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Pass ball failed (" + resp.code() + "): " + raw);
         }
     }
 
-    public void tagPlayer(String gameId, String taggerRsn, String targetRsn) throws IOException
+    public void tagPlayer(String gameId, String taggerRsn, String targetRsn, String playerToken) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", taggerRsn);
         body.addProperty("target", targetRsn);
 
-        try (Response resp = post("/v1/games/" + gameId + "/tag-player", body, null))
+        try (Response resp = post("/v1/games/" + gameId + "/tag-player", body, playerToken))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Tag player failed (" + resp.code() + "): " + raw);
         }
     }
 
-    public void zoneGoal(String gameId, String playerRsn) throws IOException
+    public void zoneGoal(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
 
-        try (Response resp = post("/v1/games/" + gameId + "/zone-goal", body, null))
+        try (Response resp = post("/v1/games/" + gameId + "/zone-goal", body, playerToken))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Zone goal failed (" + resp.code() + "): " + raw);
         }
     }
 
-    public void outOfBounds(String gameId, String playerRsn) throws IOException
+    public void outOfBounds(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
 
-        try (Response resp = post("/v1/games/" + gameId + "/out-of-bounds", body, null))
+        try (Response resp = post("/v1/games/" + gameId + "/out-of-bounds", body, playerToken))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Out of bounds failed (" + resp.code() + "): " + raw);
@@ -203,13 +209,13 @@ public class ApiClient
         }
     }
 
-    public void broadcastMessage(String gameId, String playerRsn, String message) throws IOException
+    public void broadcastMessage(String gameId, String playerRsn, String message, String playerToken) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
         body.addProperty("message", message);
 
-        try (Response resp = post("/v1/games/" + gameId + "/broadcast", body, null))
+        try (Response resp = post("/v1/games/" + gameId + "/broadcast", body, playerToken))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Broadcast message failed (" + resp.code() + "): " + raw);
@@ -265,51 +271,51 @@ public class ApiClient
         }
     }
 
-    public void blowWhistle(String gameId, String playerRsn, long remainingMs) throws IOException
+    public void blowWhistle(String gameId, String playerRsn, long remainingMs, String playerToken) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
         body.addProperty("remainingMs", remainingMs);
 
-        try (Response resp = post("/v1/games/" + gameId + "/whistle", body, null))
+        try (Response resp = post("/v1/games/" + gameId + "/whistle", body, playerToken))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Whistle failed (" + resp.code() + "): " + raw);
         }
     }
 
-    public void pauseTimer(String gameId, String playerRsn, long remainingMs) throws IOException
+    public void pauseTimer(String gameId, String playerRsn, long remainingMs, String playerToken) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
         body.addProperty("remainingMs", remainingMs);
 
-        try (Response resp = post("/v1/games/" + gameId + "/pause-timer", body, null))
+        try (Response resp = post("/v1/games/" + gameId + "/pause-timer", body, playerToken))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Pause timer failed (" + resp.code() + "): " + raw);
         }
     }
 
-    public void resumeTimer(String gameId, String playerRsn) throws IOException
+    public void resumeTimer(String gameId, String playerRsn, String playerToken) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
 
-        try (Response resp = post("/v1/games/" + gameId + "/resume-timer", body, null))
+        try (Response resp = post("/v1/games/" + gameId + "/resume-timer", body, playerToken))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Resume timer failed (" + resp.code() + "): " + raw);
         }
     }
 
-    public void setTimer(String gameId, String playerRsn, long remainingMs) throws IOException
+    public void setTimer(String gameId, String playerRsn, long remainingMs, String playerToken) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
         body.addProperty("remainingMs", remainingMs);
 
-        try (Response resp = post("/v1/games/" + gameId + "/set-timer", body, null))
+        try (Response resp = post("/v1/games/" + gameId + "/set-timer", body, playerToken))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Set timer failed (" + resp.code() + "): " + raw);
@@ -401,12 +407,14 @@ public class ApiClient
         public final String gameId;
         public final String joinCode;
         public final String writeKey;
+        public final String playerToken;
 
-        public CreateGameResult(String gameId, String joinCode, String writeKey)
+        public CreateGameResult(String gameId, String joinCode, String writeKey, String playerToken)
         {
             this.gameId = gameId;
             this.joinCode = joinCode;
             this.writeKey = writeKey;
+            this.playerToken = playerToken;
         }
     }
 
@@ -414,11 +422,13 @@ public class ApiClient
     {
         public final String gameId;
         public final String hostRsn;
+        public final String playerToken;
 
-        public JoinResult(String gameId, String hostRsn)
+        public JoinResult(String gameId, String hostRsn, String playerToken)
         {
             this.gameId = gameId;
             this.hostRsn = hostRsn;
+            this.playerToken = playerToken;
         }
     }
 
@@ -488,12 +498,14 @@ public class ApiClient
         String gameId;
         String joinCode;
         String writeKey;
+        String playerToken;
     }
 
     private static class JoinResponse
     {
         String gameId;
         String host;
+        String playerToken;
     }
 
     static boolean isBlank(String s)

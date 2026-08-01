@@ -59,6 +59,7 @@ public class GnomeballPlugin extends Plugin
     private static final String KEY_GAME_ID   = "activeGameId";
     private static final String KEY_JOIN_CODE = "activeJoinCode";
     private static final String KEY_WRITE_KEY = "activeWriteKey";
+    private static final String KEY_PLAYER_TOKEN = "activePlayerToken";
     private static final String KEY_HOST_RSN  = "activeHostRsn";
     private static final String KEY_PHASE     = "activePhase";
     private static final String KEY_DEADLINE  = "activeDeadlineMs";
@@ -136,6 +137,7 @@ public class GnomeballPlugin extends Plugin
     // ---- game state ----
     private volatile String gameId   = null;
     private volatile String writeKey = null;
+    private volatile String playerToken = null; // per-player session token proving identity for self-reported actions
 
     // Write keys for games this account has hosted, keyed by gameId. Kept separate from the
     // active-session config (KEY_WRITE_KEY et al.) so that leaving a game — which clears the
@@ -297,7 +299,7 @@ public class GnomeballPlugin extends Plugin
         {
             eventSocket.stop();
             stopPeriodicTasks();
-            gameId = null; writeKey = null; joinCode = null; hostRsn = null;
+            gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
             phase = GamePhase.DISCONNECTED; deadlineMs = 0; winner = null;
             teamAName = "Team A"; teamBName = "Team B"; teamAScore = 0; teamBScore = 0;
             timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0; ballHolder = null;
@@ -447,7 +449,7 @@ public class GnomeballPlugin extends Plugin
         String zoneType = myRole == GnomeballRole.TEAM_A ? "ZONE_A" : "ZONE_B";
         if (tileReducer.hasMarker(pos, zoneType))
         {
-            onZoneScore(scoringTeam);
+            onZoneScore(scoringTeam, pos);
             return;
         }
 
@@ -455,11 +457,11 @@ public class GnomeballPlugin extends Plugin
         // has no "outside" to step out of.
         if (tileReducer.hasFieldTiles() && !tileReducer.isWithinField(pos))
         {
-            onOutOfBounds(scoringTeam);
+            onOutOfBounds(scoringTeam, pos);
         }
     }
 
-    private void onZoneScore(String scoringTeam)
+    private void onZoneScore(String scoringTeam, WorldPoint pos)
     {
         int oldScore = "TEAM_A".equals(scoringTeam) ? teamAScore : teamBScore;
         int newScore = oldScore + 1;
@@ -484,14 +486,15 @@ public class GnomeballPlugin extends Plugin
         final String gid = gameId;
         final String rsn = localRsn();
         if (gid == null || rsn == null) return;
+        final String token = playerToken;
         executor.submit(() ->
         {
-            try { apiClient.zoneGoal(gid, rsn); }
+            try { apiClient.zoneGoal(gid, rsn, token, pos.getX(), pos.getY(), pos.getPlane()); }
             catch (Exception ignored) { }
         });
     }
 
-    private void onOutOfBounds(String offendingTeam)
+    private void onOutOfBounds(String offendingTeam, WorldPoint pos)
     {
         obligationActive = true;
         obligationTeam = offendingTeam;
@@ -504,9 +507,10 @@ public class GnomeballPlugin extends Plugin
         final String gid = gameId;
         final String rsn = localRsn();
         if (gid == null || rsn == null) return;
+        final String token = playerToken;
         executor.submit(() ->
         {
-            try { apiClient.outOfBounds(gid, rsn); }
+            try { apiClient.outOfBounds(gid, rsn, token, pos.getX(), pos.getY(), pos.getPlane()); }
             catch (Exception ignored) { }
         });
     }
@@ -642,10 +646,11 @@ public class GnomeballPlugin extends Plugin
         if (gid == null) return;
         final String self = selfRsn;
         final String tagger = attackerRsn;
+        final String token = playerToken;
 
         executor.submit(() ->
         {
-            try { apiClient.tagPlayer(gid, tagger, self); }
+            try { apiClient.tagPlayer(gid, tagger, self, token); }
             catch (Exception ignored) { }
         });
     }
@@ -1226,6 +1231,7 @@ public class GnomeballPlugin extends Plugin
                 ApiClient.CreateGameResult result = apiClient.createGame(rsn);
                 gameId   = result.gameId;
                 writeKey = result.writeKey;
+                playerToken = result.playerToken;
                 joinCode = result.joinCode;
                 hostRsn  = rsn;
                 phase    = GamePhase.LOBBY;
@@ -1250,6 +1256,7 @@ public class GnomeballPlugin extends Plugin
             {
                 ApiClient.JoinResult result = apiClient.joinGame(code, rsn);
                 gameId   = result.gameId;
+                playerToken = result.playerToken;
                 joinCode = code.toUpperCase(Locale.ROOT);
                 hostRsn  = result.hostRsn;
                 // Rejoining a game this account previously hosted (e.g. after clicking "Leave")
@@ -1294,6 +1301,7 @@ public class GnomeballPlugin extends Plugin
     {
         final String gid = gameId;
         final String rsn = localRsn();
+        final String token = playerToken; // resetState() below clears the field -- must capture first
         eventSocket.stop();
         stopPeriodicTasks();
         resetState();
@@ -1303,7 +1311,7 @@ public class GnomeballPlugin extends Plugin
         {
             executor.submit(() ->
             {
-                try { apiClient.leaveGame(gid, rsn); }
+                try { apiClient.leaveGame(gid, rsn, token); }
                 catch (Exception ignored) { }
             });
         }
@@ -1339,7 +1347,7 @@ public class GnomeballPlugin extends Plugin
         if (rsn == null) return;
         executor.submit(() ->
         {
-            try { apiClient.broadcastMessage(gameId, rsn, trimmed); }
+            try { apiClient.broadcastMessage(gameId, rsn, trimmed, playerToken); }
             catch (Exception ignored) { }
         });
     }
@@ -1349,9 +1357,10 @@ public class GnomeballPlugin extends Plugin
         final String gid = gameId;
         final String rsn = localRsn();
         if (gid == null || rsn == null) return;
+        final String token = playerToken;
         executor.submit(() ->
         {
-            try { apiClient.passBall(gid, rsn, targetRsn); }
+            try { apiClient.passBall(gid, rsn, targetRsn, token); }
             catch (Exception ignored) { }
         });
     }
@@ -1603,7 +1612,7 @@ public class GnomeballPlugin extends Plugin
 
         executor.submit(() ->
         {
-            try { apiClient.blowWhistle(gid, rsn, remaining); }
+            try { apiClient.blowWhistle(gid, rsn, remaining, playerToken); }
             catch (Exception ignored) { }
         });
     }
@@ -1623,7 +1632,7 @@ public class GnomeballPlugin extends Plugin
 
             executor.submit(() ->
             {
-                try { apiClient.resumeTimer(gid, rsn); }
+                try { apiClient.resumeTimer(gid, rsn, playerToken); }
                 catch (Exception ignored) { }
             });
         }
@@ -1637,7 +1646,7 @@ public class GnomeballPlugin extends Plugin
 
             executor.submit(() ->
             {
-                try { apiClient.pauseTimer(gid, rsn, remaining); }
+                try { apiClient.pauseTimer(gid, rsn, remaining, playerToken); }
                 catch (Exception ignored) { }
             });
         }
@@ -1667,7 +1676,7 @@ public class GnomeballPlugin extends Plugin
 
         executor.submit(() ->
         {
-            try { apiClient.setTimer(gid, rsn, remaining); }
+            try { apiClient.setTimer(gid, rsn, remaining, playerToken); }
             catch (Exception ignored) { }
         });
     }
@@ -1682,6 +1691,7 @@ public class GnomeballPlugin extends Plugin
         configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_GAME_ID,   gameId);
         configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_JOIN_CODE, joinCode != null ? joinCode : "");
         configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_WRITE_KEY, writeKey != null ? writeKey : "");
+        configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_PLAYER_TOKEN, playerToken != null ? playerToken : "");
         configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_HOST_RSN,  hostRsn != null ? hostRsn : "");
         configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_PHASE,     phase.name());
         configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_DEADLINE,  String.valueOf(deadlineMs));
@@ -1692,6 +1702,7 @@ public class GnomeballPlugin extends Plugin
         configManager.unsetRSProfileConfiguration(CONFIG_GROUP, KEY_GAME_ID);
         configManager.unsetRSProfileConfiguration(CONFIG_GROUP, KEY_JOIN_CODE);
         configManager.unsetRSProfileConfiguration(CONFIG_GROUP, KEY_WRITE_KEY);
+        configManager.unsetRSProfileConfiguration(CONFIG_GROUP, KEY_PLAYER_TOKEN);
         configManager.unsetRSProfileConfiguration(CONFIG_GROUP, KEY_HOST_RSN);
         configManager.unsetRSProfileConfiguration(CONFIG_GROUP, KEY_PHASE);
         configManager.unsetRSProfileConfiguration(CONFIG_GROUP, KEY_DEADLINE);
@@ -1712,6 +1723,8 @@ public class GnomeballPlugin extends Plugin
                 joinCode = configManager.getRSProfileConfiguration(CONFIG_GROUP, KEY_JOIN_CODE, String.class);
                 String savedWriteKey = configManager.getRSProfileConfiguration(CONFIG_GROUP, KEY_WRITE_KEY, String.class);
                 writeKey = (savedWriteKey != null && !savedWriteKey.isEmpty()) ? savedWriteKey : null;
+                String savedPlayerToken = configManager.getRSProfileConfiguration(CONFIG_GROUP, KEY_PLAYER_TOKEN, String.class);
+                playerToken = (savedPlayerToken != null && !savedPlayerToken.isEmpty()) ? savedPlayerToken : null;
                 hostRsn  = configManager.getRSProfileConfiguration(CONFIG_GROUP, KEY_HOST_RSN, String.class);
 
                 String savedPhaseStr = configManager.getRSProfileConfiguration(CONFIG_GROUP, KEY_PHASE, String.class);
@@ -1756,7 +1769,7 @@ public class GnomeballPlugin extends Plugin
     private void resetState()
     {
         clearSession();
-        gameId = null; writeKey = null; joinCode = null; hostRsn = null;
+        gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
         phase = GamePhase.DISCONNECTED; deadlineMs = 0; winner = null;
         teamAName = "Team A"; teamBName = "Team B"; teamAScore = 0; teamBScore = 0;
         timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0; ballHolder = null;
