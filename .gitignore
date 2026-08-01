@@ -15,3 +15,8 @@ out/
 
 # Local-only dev convenience (multi-instance test launchers) -- not for Plugin Hub submission
 local-dev.gradle
+
+# Kept locally for manual reconnect testing, but untracked so the Hub's build=standard clone never
+# sees it -- it depends on the mockwebserver test dependency, which standard's replacement
+# build.gradle template doesn't include.
+src/test/java/gay/runescape/gnomeball/EventSocketTest.java
