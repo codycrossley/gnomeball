@@ -1353,13 +1353,15 @@ public class GnomeballPlugin extends Plugin
 
     public void onBroadcastMessageClicked(String message)
     {
-        if (!isHost() || gameId == null) return;
+        if (!isReferee() || gameId == null) return;
         if (message == null) return;
         final String trimmed = message.trim();
         if (trimmed.isEmpty()) return;
+        final String rsn = localRsn();
+        if (rsn == null) return;
         executor.submit(() ->
         {
-            try { apiClient.broadcastMessage(gameId, writeKey, trimmed); }
+            try { apiClient.broadcastMessage(gameId, rsn, trimmed); }
             catch (Exception ex) { log.warn("Broadcast message failed: {}", ex.getMessage()); }
         });
     }

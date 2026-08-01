@@ -62,8 +62,8 @@ public class CheerleaderRenderer
     // behind it, purely to look alive. Game-tick cadence (600ms) is plenty precise for deciding
     // "start talking now" -- unlike the animation-completion problem earlier, this isn't racing a
     // fast native completion signal, so there's no equivalent polling-rate issue here.
-    private static final int CHATTER_INTERVAL_MIN_MS = 6000;
-    private static final int CHATTER_INTERVAL_MAX_MS = 15000;
+    private static final int CHATTER_INTERVAL_MIN_MS = 15000;
+    private static final int CHATTER_INTERVAL_MAX_MS = 27000;
     private static final long CHATTER_DURATION_MS = 2500;
 
     // %s is the cheerleader's own team name; templates without one just ignore the extra arg

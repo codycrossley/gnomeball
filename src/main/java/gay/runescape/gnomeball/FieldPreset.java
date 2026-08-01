@@ -316,9 +316,9 @@ public final class FieldPreset
         tiles.add(new RelativeTile(11, 1, "FIELD", null));
         tiles.add(new RelativeTile(-11, 0, "FIELD", null));
         tiles.add(new RelativeTile(-10, 0, "FIELD", null));
+        tiles.add(new RelativeTile(-10, 0, "ZONE_A", null));
         tiles.add(new RelativeTile(-9, 0, "FIELD", null));
         tiles.add(new RelativeTile(-8, 0, "FIELD", null));
-        tiles.add(new RelativeTile(-8, 0, "ZONE_A", null));
         tiles.add(new RelativeTile(-7, 0, "FIELD", null));
         tiles.add(new RelativeTile(-6, 0, "FIELD", null));
         tiles.add(new RelativeTile(-5, 0, "FIELD", null));
@@ -335,9 +335,9 @@ public final class FieldPreset
         tiles.add(new RelativeTile(6, 0, "FIELD", null));
         tiles.add(new RelativeTile(7, 0, "FIELD", null));
         tiles.add(new RelativeTile(8, 0, "FIELD", null));
-        tiles.add(new RelativeTile(8, 0, "ZONE_B", null));
         tiles.add(new RelativeTile(9, 0, "FIELD", null));
         tiles.add(new RelativeTile(10, 0, "FIELD", null));
+        tiles.add(new RelativeTile(10, 0, "ZONE_B", null));
         tiles.add(new RelativeTile(11, 0, "FIELD", null));
         tiles.add(new RelativeTile(-11, -1, "FIELD", null));
         tiles.add(new RelativeTile(-10, -1, "FIELD", null));

@@ -206,12 +206,13 @@ public class ApiClient
         }
     }
 
-    public void broadcastMessage(String gameId, String writeKey, String message) throws IOException
+    public void broadcastMessage(String gameId, String playerRsn, String message) throws IOException
     {
         JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
         body.addProperty("message", message);
 
-        try (Response resp = post("/v1/games/" + gameId + "/broadcast", body, writeKey))
+        try (Response resp = post("/v1/games/" + gameId + "/broadcast", body, null))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Broadcast message failed (" + resp.code() + "): " + raw);

@@ -23,6 +23,12 @@ public class TileOverlay extends Overlay
     private static final Color COLOR_ZONE_B   = new Color(200, 60, 60);
     private static final Color COLOR_OUT_OF_BOUNDS_FLASH = new Color(255, 210, 0);
     private static final long  OUT_OF_BOUNDS_PULSE_PERIOD_MS = 260;
+    // Matches TimerOverlay's own running-outline/pause-glow exactly (same colors, same pulse
+    // period) -- the field outline should read as "running"/"paused" using the identical visual
+    // language as the clock box's own border already does.
+    private static final Color COLOR_FIELD_RUNNING = new Color(60, 179, 74);
+    private static final Color COLOR_PAUSE_GLOW = new Color(255, 200, 60, 255);
+    private static final long  PAUSE_GLOW_PULSE_PERIOD_MS = 1400;
 
     /** Types whose committed tiles render as a connected-region outline (edges only), rather than
      * each tile individually filled — these tend to cover large areas, and filling every tile
@@ -93,13 +99,33 @@ public class TileOverlay extends Overlay
         }
 
         Color oobFlash = resolveOutOfBoundsFlashColor();
+        boolean timerPaused = plugin.getPhase() == GamePhase.ACTIVE && plugin.isTimerPaused();
+        Color fieldColor = resolveFieldOutlineColor(timerPaused);
 
         for (String type : OUTLINE_TYPES)
         {
             Set<WorldPoint> tiles = byType.get(type);
             if (tiles.isEmpty()) continue;
-            Color edgeColor = oobFlash != null ? oobFlash : withAlpha(defaultColorFor(type), 220);
-            Stroke stroke = oobFlash != null ? FLASH_STROKE : SOLID_STROKE;
+
+            Color edgeColor;
+            Stroke stroke;
+            if (oobFlash != null)
+            {
+                // A player just went out of bounds -- takes priority over the (sustained, much
+                // calmer) field/pause coloring since it's the more urgent, briefer signal.
+                edgeColor = oobFlash;
+                stroke = FLASH_STROKE;
+            }
+            else if ("FIELD".equals(type) && fieldColor != null)
+            {
+                edgeColor = fieldColor;
+                stroke = timerPaused ? FLASH_STROKE : SOLID_STROKE; // pulsing yellow gets the thicker stroke like the OOB flash does; steady green doesn't need it
+            }
+            else
+            {
+                edgeColor = withAlpha(defaultColorFor(type), 220);
+                stroke = SOLID_STROKE;
+            }
             renderOutline(g, tiles, connectivityFor(type, byType), edgeColor, stroke);
         }
     }
@@ -118,6 +144,25 @@ public class TileOverlay extends Overlay
         float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / OUT_OF_BOUNDS_PULSE_PERIOD_MS));
         int alpha = (int) (140 + 115 * pulse);
         return withAlpha(COLOR_OUT_OF_BOUNDS_FLASH, alpha);
+    }
+
+    /** Resolves the FIELD outline's color to match the timer's own state, using the identical
+     * visual language TimerOverlay already uses on its own clock-box border: steady green while
+     * the clock is actively running, the same pulsing yellow while paused, or null (falls back to
+     * the normal white) during LOBBY/ENDED, when there's no running clock to reflect at all. */
+    private Color resolveFieldOutlineColor(boolean timerPaused)
+    {
+        if (plugin.getPhase() != GamePhase.ACTIVE) return null; // LOBBY/ENDED -- stays white
+
+        if (timerPaused)
+        {
+            long phaseMs = System.currentTimeMillis() % PAUSE_GLOW_PULSE_PERIOD_MS;
+            float pulse = (float) (0.5 + 0.5 * Math.sin(2 * Math.PI * phaseMs / PAUSE_GLOW_PULSE_PERIOD_MS));
+            int alpha = (int) (100 + 155 * pulse);
+            return withAlpha(COLOR_PAUSE_GLOW, alpha);
+        }
+
+        return withAlpha(COLOR_FIELD_RUNNING, 220);
     }
 
     private void renderPresetPreview(Graphics2D g)

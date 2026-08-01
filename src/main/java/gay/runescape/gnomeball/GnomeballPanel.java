@@ -15,6 +15,7 @@ public class GnomeballPanel extends PluginPanel
 {
     private static final int BORDER = 8;
     private static final Color COLOR_REFEREE = new Color(60, 179, 74);
+    private static final Color COLOR_BALL    = new Color(255, 200, 60, 255);
     private static final Color COLOR_TEAM_A  = new Color(60, 120, 220);
     private static final Color COLOR_TEAM_B  = new Color(200, 60, 60);
     private static final Color ROW_EVEN      = new Color(40, 40, 40);
@@ -70,12 +71,15 @@ public class GnomeballPanel extends PluginPanel
     // Host in-game controls (ACTIVE only, within host card)
     private final JPanel hostInGamePanel = new JPanel();
     private final JButton endGameBtn   = new JButton("End Game");
-    private final JPanel  hostMessagePanel = new JPanel();
-    private final JTextField hostMessageField = new JTextField();
-    private final JButton sendMessageBtn = new JButton("Send Message");
 
-    // Referee controls (ACTIVE, referee role)
+    // Referee controls (referee role). Broadcast Message is available in LOBBY or ACTIVE; the
+    // whistle/clock controls only make sense once there's an actual running clock, so they're
+    // confined to a nested ACTIVE-only sub-panel.
     private final JPanel  refereePanel    = new JPanel();
+    private final JPanel  refereeMessagePanel = new JPanel();
+    private final JTextField refereeMessageField = new JTextField();
+    private final JButton sendMessageBtn = new JButton("Send Message");
+    private final JPanel  refereeActiveControlsPanel = new JPanel();
     private final JButton whistleBtn      = new JButton("Blow Whistle");
     private final JButton timerToggleBtn  = new JButton("STOP");
     private final JButton setClockBtn     = new JButton("Set Clock");
@@ -464,7 +468,7 @@ public class GnomeballPanel extends PluginPanel
         hostPreStartPanel.add(startGameBtn);
         hostControlsCard.add(hostPreStartPanel);
 
-        // In-game sub-group (ACTIVE only): end game + broadcast message
+        // In-game sub-group (ACTIVE only): end game
         hostInGamePanel.setLayout(new BoxLayout(hostInGamePanel, BoxLayout.Y_AXIS));
         hostInGamePanel.setBackground(new Color(34, 30, 26));
         hostInGamePanel.setAlignmentX(LEFT_ALIGNMENT);
@@ -475,43 +479,14 @@ public class GnomeballPanel extends PluginPanel
         endGameBtn.setForeground(new Color(220, 60, 60));
         endGameBtn.addActionListener(e -> plugin.onEndClicked());
         hostInGamePanel.add(endGameBtn);
-        hostInGamePanel.add(Box.createVerticalStrut(8));
-
-        JLabel messageTitle = new JLabel("Broadcast Message");
-        messageTitle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-        messageTitle.setFont(FontManager.getRunescapeSmallFont());
-        messageTitle.setAlignmentX(LEFT_ALIGNMENT);
-
-        hostMessagePanel.setLayout(new BoxLayout(hostMessagePanel, BoxLayout.Y_AXIS));
-        hostMessagePanel.setBackground(new Color(34, 30, 26));
-        hostMessagePanel.setAlignmentX(LEFT_ALIGNMENT);
-
-        hostMessageField.setAlignmentX(LEFT_ALIGNMENT);
-        hostMessageField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-        Runnable sendMessage = () ->
-        {
-            plugin.onBroadcastMessageClicked(hostMessageField.getText());
-            hostMessageField.setText("");
-        };
-        hostMessageField.addActionListener(e -> sendMessage.run());
-
-        sendMessageBtn.setAlignmentX(LEFT_ALIGNMENT);
-        sendMessageBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        sendMessageBtn.addActionListener(e -> sendMessage.run());
-
-        hostMessagePanel.add(hostMessageField);
-        hostMessagePanel.add(Box.createVerticalStrut(4));
-        hostMessagePanel.add(sendMessageBtn);
-
-        hostInGamePanel.add(messageTitle);
-        hostInGamePanel.add(Box.createVerticalStrut(4));
-        hostInGamePanel.add(hostMessagePanel);
         hostControlsCard.add(hostInGamePanel);
 
         card.add(hostControlsCard);
         card.add(Box.createVerticalStrut(8));
 
-        // ===== REFEREE CONTROLS card (referee role only, ACTIVE) =====
+        // ===== REFEREE CONTROLS card (referee role only). Broadcast Message is shown in LOBBY
+        // or ACTIVE; whistle/clock controls are confined to the nested ACTIVE-only sub-panel
+        // below since they only make sense once there's an actual running clock. =====
         refereePanel.setLayout(new BoxLayout(refereePanel, BoxLayout.Y_AXIS));
         refereePanel.setBackground(new Color(24, 34, 26));
         refereePanel.setBorder(BorderFactory.createCompoundBorder(
@@ -524,10 +499,48 @@ public class GnomeballPanel extends PluginPanel
         refTitle.setForeground(COLOR_REFEREE);
         refTitle.setFont(FontManager.getRunescapeSmallFont());
         refTitle.setAlignmentX(LEFT_ALIGNMENT);
+        refereePanel.add(refTitle);
+        refereePanel.add(Box.createVerticalStrut(6));
+
+        JLabel messageTitle = new JLabel("Broadcast Message");
+        messageTitle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+        messageTitle.setFont(FontManager.getRunescapeSmallFont());
+        messageTitle.setAlignmentX(LEFT_ALIGNMENT);
+
+        refereeMessagePanel.setLayout(new BoxLayout(refereeMessagePanel, BoxLayout.Y_AXIS));
+        refereeMessagePanel.setBackground(new Color(24, 34, 26));
+        refereeMessagePanel.setAlignmentX(LEFT_ALIGNMENT);
+
+        refereeMessageField.setAlignmentX(LEFT_ALIGNMENT);
+        refereeMessageField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        Runnable sendMessage = () ->
+        {
+            plugin.onBroadcastMessageClicked(refereeMessageField.getText());
+            refereeMessageField.setText("");
+        };
+        refereeMessageField.addActionListener(e -> sendMessage.run());
+
+        sendMessageBtn.setAlignmentX(LEFT_ALIGNMENT);
+        sendMessageBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        sendMessageBtn.addActionListener(e -> sendMessage.run());
+
+        refereeMessagePanel.add(refereeMessageField);
+        refereeMessagePanel.add(Box.createVerticalStrut(4));
+        refereeMessagePanel.add(sendMessageBtn);
+
+        refereePanel.add(messageTitle);
+        refereePanel.add(Box.createVerticalStrut(4));
+        refereePanel.add(refereeMessagePanel);
+        refereePanel.add(Box.createVerticalStrut(8));
+
+        refereeActiveControlsPanel.setLayout(new BoxLayout(refereeActiveControlsPanel, BoxLayout.Y_AXIS));
+        refereeActiveControlsPanel.setBackground(new Color(24, 34, 26));
+        refereeActiveControlsPanel.setAlignmentX(LEFT_ALIGNMENT);
+        refereeActiveControlsPanel.setVisible(false);
 
         whistleBtn.setAlignmentX(LEFT_ALIGNMENT);
         whistleBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        whistleBtn.setForeground(COLOR_REFEREE);
+        whistleBtn.setForeground(COLOR_BALL);
         whistleBtn.addActionListener(e -> plugin.onBlowWhistleClicked());
 
         timerToggleBtn.setAlignmentX(LEFT_ALIGNMENT);
@@ -538,13 +551,13 @@ public class GnomeballPanel extends PluginPanel
         setClockBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
         setClockBtn.addActionListener(e -> showSetClockDialog());
 
-        refereePanel.add(refTitle);
-        refereePanel.add(Box.createVerticalStrut(6));
-        refereePanel.add(whistleBtn);
-        refereePanel.add(Box.createVerticalStrut(4));
-        refereePanel.add(timerToggleBtn);
-        refereePanel.add(Box.createVerticalStrut(4));
-        refereePanel.add(setClockBtn);
+        refereeActiveControlsPanel.add(whistleBtn);
+        refereeActiveControlsPanel.add(Box.createVerticalStrut(4));
+        refereeActiveControlsPanel.add(timerToggleBtn);
+        refereeActiveControlsPanel.add(Box.createVerticalStrut(4));
+        refereeActiveControlsPanel.add(setClockBtn);
+
+        refereePanel.add(refereeActiveControlsPanel);
         card.add(refereePanel);
         card.add(Box.createVerticalStrut(4));
 
@@ -583,7 +596,8 @@ public class GnomeballPanel extends PluginPanel
                 refreshGridButton();
                 hostPreStartPanel.setVisible(isHost);
                 hostInGamePanel.setVisible(false);
-                refereePanel.setVisible(false);
+                refereePanel.setVisible(plugin.isReferee());
+                refereeActiveControlsPanel.setVisible(false);
                 leaveGameBtn.setVisible(true);
                 refreshRoster(plugin.getRoster().snapshot());
                 break;
@@ -597,7 +611,8 @@ public class GnomeballPanel extends PluginPanel
                 hostPreStartPanel.setVisible(false);
                 hostInGamePanel.setVisible(isHost);
                 refereePanel.setVisible(plugin.isReferee());
-                timerToggleBtn.setText(plugin.isTimerPaused() ? "START" : "STOP");
+                refereeActiveControlsPanel.setVisible(true);
+                timerToggleBtn.setText(plugin.isTimerPaused() ? "START Clock" : "STOP Clock");
                 leaveGameBtn.setVisible(true);
                 refreshRoster(plugin.getRoster().snapshot());
                 break;
