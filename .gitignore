@@ -12,3 +12,6 @@ out/
 # macOS
 .DS_Store
 **/.DS_Store
+
+# Local-only dev convenience (multi-instance test launchers) -- not for Plugin Hub submission
+local-dev.gradle

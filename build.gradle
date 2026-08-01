@@ -44,14 +44,8 @@ tasks.register('run', JavaExec) {
     args = ["--developer-mode"]
 }
 
-['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'Purple', 'Twunkemon', 'Pika', 'Mew', 'Jiggly', 'Bulba', 'Squirt', 'Char'].each { name ->
-    tasks.register("run${name}", JavaExec) {
-        classpath = sourceSets.test.runtimeClasspath
-        mainClass = pluginMainClass
-
-        jvmArgs "-ea", "--add-opens", "java.desktop/com.apple.eawt=ALL-UNNAMED", "-Duser.home=/Users/codycrossley/.runelite-${name.toLowerCase()}".toString()
-        args = ["--developer-mode"]
-    }
+if (file('local-dev.gradle').exists()) {
+	apply from: 'local-dev.gradle'
 }
 
 tasks.register('shadowJar', Jar) {
