@@ -20,7 +20,13 @@ import net.runelite.client.ui.overlay.OverlayPriority;
  * measured wall-clock delta rather than assuming a constant frame time. */
 public class ConfettiOverlay extends Overlay
 {
-    private static final Color[] PALETTE = {
+    // Matches TileOverlay's own COLOR_ZONE_A/COLOR_ZONE_B -- same colors that team's zone tiles
+    // and field-end flash already render in.
+    private static final Color COLOR_TEAM_A = new Color(60, 120, 220);
+    private static final Color COLOR_TEAM_B = new Color(200, 60, 60);
+
+    // Fallback burst for a tie, when there's no single winning team's color to draw from.
+    private static final Color[] TIE_PALETTE = {
         new Color(255, 80, 80),
         new Color(255, 210, 0),
         new Color(60, 179, 74),
@@ -74,6 +80,7 @@ public class ConfettiOverlay extends Overlay
 
     private void spawnBurst(int canvasWidth)
     {
+        Color[] palette = resolvePalette();
         ThreadLocalRandom r = ThreadLocalRandom.current();
         for (int i = 0; i < PARTICLE_COUNT; i++)
         {
@@ -85,12 +92,44 @@ public class ConfettiOverlay extends Overlay
             p.rotation = r.nextFloat() * (float) (2 * Math.PI);
             p.rotSpeed = -6 + r.nextFloat() * 12;
             p.size = 3 + r.nextFloat() * 4;
-            p.color = PALETTE[r.nextInt(PALETTE.length)];
+            p.color = palette[r.nextInt(palette.length)];
             p.life = 2.5f + r.nextFloat() * 1.5f;
             p.rect = r.nextBoolean();
             p.swayPhase = r.nextFloat() * (float) (2 * Math.PI);
             particles.add(p);
         }
+    }
+
+    /** Shades/tints of the winning team's own color (plus white), or the original multi-color
+     * burst on a tie, when {@link GnomeballPlugin#getFieldEndFlashTeam()} is null and there's no
+     * single team color to draw from. */
+    private Color[] resolvePalette()
+    {
+        String team = plugin.getFieldEndFlashTeam();
+        if (team == null) return TIE_PALETTE;
+
+        Color base = "TEAM_A".equals(team) ? COLOR_TEAM_A : COLOR_TEAM_B;
+        return new Color[] {
+            shade(base, 0.55f),
+            shade(base, 0.8f),
+            base,
+            tint(base, 0.4f),
+            tint(base, 0.7f),
+            Color.WHITE,
+        };
+    }
+
+    private static Color shade(Color c, float factor)
+    {
+        return new Color((int) (c.getRed() * factor), (int) (c.getGreen() * factor), (int) (c.getBlue() * factor));
+    }
+
+    private static Color tint(Color c, float factor)
+    {
+        return new Color(
+            (int) (c.getRed() + (255 - c.getRed()) * factor),
+            (int) (c.getGreen() + (255 - c.getGreen()) * factor),
+            (int) (c.getBlue() + (255 - c.getBlue()) * factor));
     }
 
     private void update(float dt, int canvasHeight)

@@ -99,6 +99,7 @@ public class TileOverlay extends Overlay
         }
 
         Color oobFlash = resolveOutOfBoundsFlashColor();
+        Color fieldEndFlash = resolveFieldEndFlashColor();
         boolean timerPaused = plugin.getPhase() == GamePhase.ACTIVE && plugin.isTimerPaused();
         Color fieldColor = resolveFieldOutlineColor(timerPaused);
 
@@ -114,6 +115,13 @@ public class TileOverlay extends Overlay
                 // A player just went out of bounds -- takes priority over the (sustained, much
                 // calmer) field/pause coloring since it's the more urgent, briefer signal.
                 edgeColor = oobFlash;
+                stroke = FLASH_STROKE;
+            }
+            else if ("FIELD".equals(type) && fieldEndFlash != null)
+            {
+                // Same priority tier as the OOB flash -- brief and celebratory, so it should win
+                // over the (by now white, per resolveFieldOutlineColor) idle field color.
+                edgeColor = fieldEndFlash;
                 stroke = FLASH_STROKE;
             }
             else if ("FIELD".equals(type) && fieldColor != null)
@@ -149,10 +157,14 @@ public class TileOverlay extends Overlay
     /** Resolves the FIELD outline's color to match the timer's own state, using the identical
      * visual language TimerOverlay already uses on its own clock-box border: steady green while
      * the clock is actively running, the same pulsing yellow while paused, or null (falls back to
-     * the normal white) during LOBBY/ENDED, when there's no running clock to reflect at all. */
+     * the normal white) during LOBBY/ENDED, when there's no running clock to reflect at all. Also
+     * falls back to white the instant the clock hits 0 -- same as TimerOverlay's own border --
+     * rather than staying green until the server's (potentially delayed) GAME_ENDED confirmation
+     * arrives. */
     private Color resolveFieldOutlineColor(boolean timerPaused)
     {
         if (plugin.getPhase() != GamePhase.ACTIVE) return null; // LOBBY/ENDED -- stays white
+        if (plugin.isClockAtZero()) return null; // clock hit 0 -- stays white too
 
         if (timerPaused)
         {
@@ -163,6 +175,26 @@ public class TileOverlay extends Overlay
         }
 
         return withAlpha(COLOR_FIELD_RUNNING, 220);
+    }
+
+    /** Returns a brief flash of the winning team's own color (matching {@link #COLOR_ZONE_A}/
+     * {@link #COLOR_ZONE_B}, the same colors that team's zone tiles already render in) the moment
+     * the clock hits 0, or null if there's no flash active right now -- including the tie case,
+     * where {@link GnomeballPlugin#getFieldEndFlashTeam()} is left null and nothing ever flashes.
+     * Fades out over the flash's final 500ms, the same fade curve TimerOverlay's own goal-flash
+     * uses. */
+    private Color resolveFieldEndFlashColor()
+    {
+        long until = plugin.getFieldEndFlashUntil();
+        long now = System.currentTimeMillis();
+        if (now >= until) return null;
+
+        String team = plugin.getFieldEndFlashTeam();
+        if (team == null) return null; // tie -- no flash
+
+        Color base = "TEAM_A".equals(team) ? COLOR_ZONE_A : COLOR_ZONE_B;
+        float alpha = Math.min(1f, (until - now) / 500f);
+        return withAlpha(base, (int) (220 * alpha));
     }
 
     private void renderPresetPreview(Graphics2D g)

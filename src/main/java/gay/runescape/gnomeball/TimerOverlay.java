@@ -107,8 +107,14 @@ public class TimerOverlay extends Overlay
         {
             if (plugin.isTimerPaused())
                 renderPauseGlow(g, boxW, boxH);
+            else if (plugin.isClockAtZero())
+                renderIdleOutline(g, boxW, boxH);
             else
                 renderRunningOutline(g, boxW, boxH);
+        }
+        else
+        {
+            renderIdleOutline(g, boxW, boxH);
         }
 
         g.setFont(timerFont);
@@ -172,6 +178,15 @@ public class TimerOverlay extends Overlay
         Stroke oldStroke = g.getStroke();
         g.setStroke(new BasicStroke(2.5f));
         g.setColor(COLOR_REFEREE);
+        g.drawRoundRect(1, 1, boxW - 3, boxH - 3, 6, 6);
+        g.setStroke(oldStroke);
+    }
+
+    private void renderIdleOutline(Graphics2D g, int boxW, int boxH)
+    {
+        Stroke oldStroke = g.getStroke();
+        g.setStroke(new BasicStroke(2.5f));
+        g.setColor(COLOR_PLENTY);
         g.drawRoundRect(1, 1, boxW - 3, boxH - 3, 6, 6);
         g.setStroke(oldStroke);
     }

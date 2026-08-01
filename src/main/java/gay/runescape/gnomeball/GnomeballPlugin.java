@@ -178,6 +178,8 @@ public class GnomeballPlugin extends Plugin
     private volatile long   outOfBoundsFlashUntil  = 0;
     private volatile long gameEndFlashUntil = 0;
     private volatile long confettiUntil = 0;
+    private volatile long   fieldEndFlashUntil = 0;
+    private volatile String fieldEndFlashTeam  = null; // "TEAM_A"/"TEAM_B", or null for a tie (no flash)
     // Edge-trigger latch for the clock-reaches-zero celebration: only true once the countdown has
     // actually crossed from >0 into <=0, so the celebration fires exactly once per expiry rather
     // than on every tick spent sitting at zero. Deliberately left untouched while paused (see
@@ -307,6 +309,7 @@ public class GnomeballPlugin extends Plugin
             outOfBoundsFlashUntil = 0;
             hostMessageText = null; hostMessageFlashUntil = 0;
             gameEndFlashUntil = 0; confettiUntil = 0; clockAtZero = false;
+            fieldEndFlashUntil = 0; fieldEndFlashTeam = null;
             if (rosterReducer != null) rosterReducer.reset();
             if (tileReducer != null) tileReducer.reset();
             if (cheerleaderRenderer != null) cheerleaderRenderer.clear();
@@ -529,6 +532,12 @@ public class GnomeballPlugin extends Plugin
     {
         gameEndFlashUntil = System.currentTimeMillis() + 8000;
         confettiUntil = System.currentTimeMillis() + 5000;
+
+        if (teamAScore != teamBScore)
+        {
+            fieldEndFlashUntil = System.currentTimeMillis() + 3000;
+            fieldEndFlashTeam = teamAScore > teamBScore ? "TEAM_A" : "TEAM_B";
+        }
     }
 
     @Subscribe
@@ -1564,6 +1573,9 @@ public class GnomeballPlugin extends Plugin
     public long          getOutOfBoundsFlashUntil()  { return outOfBoundsFlashUntil; }
     public long          getGameEndFlashUntil()      { return gameEndFlashUntil; }
     public long          getConfettiUntil()          { return confettiUntil; }
+    public boolean       isClockAtZero()             { return clockAtZero; }
+    public long          getFieldEndFlashUntil()     { return fieldEndFlashUntil; }
+    public String        getFieldEndFlashTeam()      { return fieldEndFlashTeam; }
 
     public boolean isReferee()
     {
@@ -1754,6 +1766,7 @@ public class GnomeballPlugin extends Plugin
         interceptionFlashUntil = 0; interceptionPlayer = null; interceptionTeam = null;
         outOfBoundsFlashUntil = 0;
         gameEndFlashUntil = 0; confettiUntil = 0; clockAtZero = false;
+        fieldEndFlashUntil = 0; fieldEndFlashTeam = null;
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
         if (cheerleaderRenderer != null) cheerleaderRenderer.clear();
