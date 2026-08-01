@@ -705,14 +705,16 @@ public class GnomeballPlugin extends Plugin
         if (!isHost() || gameId == null || preset == null) return;
 
         List<FieldPreset.PlacedTile> placedTiles = preset.layout(center, rotationSteps);
+        List<ApiClient.TileSpec> tileSpecs = new ArrayList<>(placedTiles.size());
+        for (FieldPreset.PlacedTile pt : placedTiles)
+        {
+            tileSpecs.add(new ApiClient.TileSpec(pt.point.getX(), pt.point.getY(), pt.point.getPlane(), pt.tileType, pt.color));
+        }
 
         executor.submit(() ->
         {
-            for (FieldPreset.PlacedTile pt : placedTiles)
-            {
-                try { apiClient.markTile(gameId, writeKey, pt.point.getX(), pt.point.getY(), pt.point.getPlane(), pt.tileType, pt.color); }
-                catch (Exception ignored) { }
-            }
+            try { apiClient.markTiles(gameId, writeKey, tileSpecs); }
+            catch (Exception ignored) { }
         });
     }
 
@@ -730,14 +732,16 @@ public class GnomeballPlugin extends Plugin
         // more than one type (e.g. Standard Field's FIELD+ZONE_A coexisting).
         Set<WorldPoint> uniquePoints = new HashSet<>();
         for (FieldPreset.PlacedTile pt : preset.layout(center, rotationSteps)) uniquePoints.add(pt.point);
+        List<ApiClient.PointSpec> pointSpecs = new ArrayList<>(uniquePoints.size());
+        for (WorldPoint wp : uniquePoints)
+        {
+            pointSpecs.add(new ApiClient.PointSpec(wp.getX(), wp.getY(), wp.getPlane(), null));
+        }
 
         executor.submit(() ->
         {
-            for (WorldPoint wp : uniquePoints)
-            {
-                try { apiClient.unmarkTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), null); }
-                catch (Exception ignored) { }
-            }
+            try { apiClient.unmarkTiles(gameId, writeKey, pointSpecs); }
+            catch (Exception ignored) { }
         });
     }
 

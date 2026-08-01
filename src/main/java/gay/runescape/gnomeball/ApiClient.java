@@ -1,6 +1,7 @@
 package gay.runescape.gnomeball;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import okhttp3.*;
 import java.io.IOException;
@@ -253,6 +254,54 @@ public class ApiClient
         }
     }
 
+    /** Batch counterpart to markTile/unmarkTile -- one request for a whole preset's worth of
+     * tiles instead of one request per tile, so committing/removing a large preset doesn't mean
+     * hundreds of sequential blocking round-trips (see commitPreset/removePreset). */
+    public void markTiles(String gameId, String writeKey, List<TileSpec> tiles) throws IOException
+    {
+        JsonArray arr = new JsonArray();
+        for (TileSpec t : tiles)
+        {
+            JsonObject tileObj = new JsonObject();
+            tileObj.addProperty("x", t.x);
+            tileObj.addProperty("y", t.y);
+            tileObj.addProperty("plane", t.plane);
+            tileObj.addProperty("tileType", t.tileType);
+            if (t.color != null) tileObj.addProperty("color", t.color);
+            arr.add(tileObj);
+        }
+        JsonObject body = new JsonObject();
+        body.add("tiles", arr);
+
+        try (Response resp = post("/v1/games/" + gameId + "/mark-tiles", body, writeKey))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Mark tiles failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    public void unmarkTiles(String gameId, String writeKey, List<PointSpec> points) throws IOException
+    {
+        JsonArray arr = new JsonArray();
+        for (PointSpec p : points)
+        {
+            JsonObject pointObj = new JsonObject();
+            pointObj.addProperty("x", p.x);
+            pointObj.addProperty("y", p.y);
+            pointObj.addProperty("plane", p.plane);
+            if (p.tileType != null) pointObj.addProperty("tileType", p.tileType);
+            arr.add(pointObj);
+        }
+        JsonObject body = new JsonObject();
+        body.add("tiles", arr);
+
+        try (Response resp = post("/v1/games/" + gameId + "/unmark-tiles", body, writeKey))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Unmark tiles failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     public TilesResponse fetchTiles(String gameId) throws IOException
     {
         Request req = new Request.Builder()
@@ -415,6 +464,36 @@ public class ApiClient
             this.joinCode = joinCode;
             this.writeKey = writeKey;
             this.playerToken = playerToken;
+        }
+    }
+
+    public static final class TileSpec
+    {
+        public final int x, y, plane;
+        public final String tileType;
+        public final String color; // nullable
+
+        public TileSpec(int x, int y, int plane, String tileType, String color)
+        {
+            this.x = x;
+            this.y = y;
+            this.plane = plane;
+            this.tileType = tileType;
+            this.color = color;
+        }
+    }
+
+    public static final class PointSpec
+    {
+        public final int x, y, plane;
+        public final String tileType; // nullable -- omitted strips every type at this position
+
+        public PointSpec(int x, int y, int plane, String tileType)
+        {
+            this.x = x;
+            this.y = y;
+            this.plane = plane;
+            this.tileType = tileType;
         }
     }
 

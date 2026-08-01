@@ -1,5 +1,7 @@
 package gay.runescape.gnomeball;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import net.runelite.api.coords.WorldPoint;
 
@@ -31,36 +33,68 @@ public class TileReducer
 
         if ("TILE_MARKED".equals(type))
         {
-            Integer x = safeInt(e.payload, "x");
-            Integer y = safeInt(e.payload, "y");
-            Integer plane = safeInt(e.payload, "plane");
-            if (x == null || y == null || plane == null) return;
-
-            String tileType = safeStr(e.payload, "tileType");
-            if (tileType == null) return; // server always requires/validates a real tileType
-            String color = safeStr(e.payload, "color");
-
-            tiles.put(key(x, y, plane, tileType),
-                new TileEntry(new WorldPoint(x, y, plane), tileType, color));
+            applyMark(e.payload);
         }
         else if ("TILE_UNMARKED".equals(type))
         {
-            Integer x = safeInt(e.payload, "x");
-            Integer y = safeInt(e.payload, "y");
-            Integer plane = safeInt(e.payload, "plane");
-            if (x == null || y == null || plane == null) return;
-
-            String tileType = safeStr(e.payload, "tileType");
-            if (tileType != null)
+            applyUnmark(e.payload);
+        }
+        else if ("TILES_MARKED".equals(type))
+        {
+            // Bulk counterpart to TILE_MARKED -- one event carrying a whole preset's worth of
+            // tiles (see mark-tiles/commitPreset), so a big preset commit is one event to apply
+            // here instead of hundreds, even though each individual tile is applied identically.
+            for (JsonElement el : asArray(e.payload, "tiles"))
             {
-                tiles.remove(key(x, y, plane, tileType));
-            }
-            else
-            {
-                String prefix = x + ":" + y + ":" + plane + ":";
-                tiles.keySet().removeIf(k -> k.startsWith(prefix));
+                if (el.isJsonObject()) applyMark(el.getAsJsonObject());
             }
         }
+        else if ("TILES_UNMARKED".equals(type))
+        {
+            for (JsonElement el : asArray(e.payload, "tiles"))
+            {
+                if (el.isJsonObject()) applyUnmark(el.getAsJsonObject());
+            }
+        }
+    }
+
+    private void applyMark(JsonObject tile)
+    {
+        Integer x = safeInt(tile, "x");
+        Integer y = safeInt(tile, "y");
+        Integer plane = safeInt(tile, "plane");
+        if (x == null || y == null || plane == null) return;
+
+        String tileType = safeStr(tile, "tileType");
+        if (tileType == null) return; // server always requires/validates a real tileType
+        String color = safeStr(tile, "color");
+
+        tiles.put(key(x, y, plane, tileType),
+            new TileEntry(new WorldPoint(x, y, plane), tileType, color));
+    }
+
+    private void applyUnmark(JsonObject tile)
+    {
+        Integer x = safeInt(tile, "x");
+        Integer y = safeInt(tile, "y");
+        Integer plane = safeInt(tile, "plane");
+        if (x == null || y == null || plane == null) return;
+
+        String tileType = safeStr(tile, "tileType");
+        if (tileType != null)
+        {
+            tiles.remove(key(x, y, plane, tileType));
+        }
+        else
+        {
+            String prefix = x + ":" + y + ":" + plane + ":";
+            tiles.keySet().removeIf(k -> k.startsWith(prefix));
+        }
+    }
+
+    private static JsonArray asArray(JsonObject o, String k)
+    {
+        return (o != null && o.has(k) && o.get(k).isJsonArray()) ? o.get(k).getAsJsonArray() : new JsonArray();
     }
 
     public void loadAll(List<ApiClient.TileOut> tileList)
