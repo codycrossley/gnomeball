@@ -6,6 +6,7 @@ import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -732,11 +733,7 @@ public class GnomeballPlugin extends Plugin
         // more than one type (e.g. Standard Field's FIELD+ZONE_A coexisting).
         Set<WorldPoint> uniquePoints = new HashSet<>();
         for (FieldPreset.PlacedTile pt : preset.layout(center, rotationSteps)) uniquePoints.add(pt.point);
-        List<ApiClient.PointSpec> pointSpecs = new ArrayList<>(uniquePoints.size());
-        for (WorldPoint wp : uniquePoints)
-        {
-            pointSpecs.add(new ApiClient.PointSpec(wp.getX(), wp.getY(), wp.getPlane(), null));
-        }
+        List<ApiClient.PointSpec> pointSpecs = toPointSpecs(uniquePoints);
 
         executor.submit(() ->
         {
@@ -1395,16 +1392,24 @@ public class GnomeballPlugin extends Plugin
 
         Set<WorldPoint> uniquePoints = new HashSet<>();
         for (TileReducer.TileEntry e : snapshot) uniquePoints.add(e.point);
+        List<ApiClient.PointSpec> pointSpecs = toPointSpecs(uniquePoints);
 
         executor.submit(() ->
         {
-            for (WorldPoint wp : uniquePoints)
-            {
-                try { apiClient.unmarkTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), null); }
-                catch (Exception ignored) { }
-            }
+            try { apiClient.unmarkTiles(gameId, writeKey, pointSpecs); }
+            catch (Exception ignored) { }
         });
         addChatMessage("Clearing current arena.");
+    }
+
+    private static List<ApiClient.PointSpec> toPointSpecs(Collection<WorldPoint> points)
+    {
+        List<ApiClient.PointSpec> specs = new ArrayList<>(points.size());
+        for (WorldPoint wp : points)
+        {
+            specs.add(new ApiClient.PointSpec(wp.getX(), wp.getY(), wp.getPlane(), null));
+        }
+        return specs;
     }
 
     public void onAssignBallClicked(String playerRsn)
