@@ -5,6 +5,7 @@ import okhttp3.*;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -167,6 +168,24 @@ public class EventSocket
             {
                 ApiClient.EventOut e = gson.fromJson(text, ApiClient.EventOut.class);
                 if (e == null) return;
+
+                // The server coalesces a short burst of events for the same game into one
+                // wrapped message instead of one frame each --
+                // unwrap it back into individual onEvent calls, in order, so nothing downstream
+                // (TileReducer, RosterReducer, handleEvent's switch) needs to know batching exists.
+                if ("EVENTS_BATCH".equals(e.type))
+                {
+                    EventsBatch batch = gson.fromJson(text, EventsBatch.class);
+                    if (batch.events == null) return;
+                    for (ApiClient.EventOut inner : batch.events)
+                    {
+                        if (inner == null) continue;
+                        lastSeq.set(Math.max(lastSeq.get(), inner.seq));
+                        listener.onEvent(inner);
+                    }
+                    return;
+                }
+
                 lastSeq.set(Math.max(lastSeq.get(), e.seq));
                 listener.onEvent(e);
             }
@@ -194,5 +213,13 @@ public class EventSocket
             listener.onError(t instanceof Exception ? (Exception) t : new RuntimeException(t));
             if (running) scheduleReconnect();
         }
+    }
+
+    /** Wire shape for a coalesced burst of events (see app.py's _broadcast_batch) -- only sent
+     * when more than one event landed in the server's ~100ms buffering window for this game. */
+    private static final class EventsBatch
+    {
+        String type;
+        List<ApiClient.EventOut> events;
     }
 }
