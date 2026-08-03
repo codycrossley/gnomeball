@@ -52,7 +52,9 @@ import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
 import okhttp3.OkHttpClient;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @PluginDescriptor(name = "Gnomeball")
 public class GnomeballPlugin extends Plugin
 {
@@ -556,11 +558,19 @@ public class GnomeballPlugin extends Plugin
         if (localRsn == null) return;
 
         // Must currently hold the ball
-        if (ballHolder == null || !ballHolder.equalsIgnoreCase(localRsn)) return;
+        if (ballHolder == null || !ballHolder.equalsIgnoreCase(localRsn))
+        {
+            log.debug("Pass blocked: {} does not currently hold the ball (holder={})", localRsn, ballHolder);
+            return;
+        }
 
         // Must be an enlisted team player
         GnomeballRole myRole = rosterReducer.getRole(localRsn);
-        if (myRole != GnomeballRole.TEAM_A && myRole != GnomeballRole.TEAM_B) return;
+        if (myRole != GnomeballRole.TEAM_A && myRole != GnomeballRole.TEAM_B)
+        {
+            log.debug("Pass blocked: {} is not an enlisted team player (role={})", localRsn, myRole);
+            return;
+        }
 
         // Must be throwing a gnomeball (or the F2P-friendly Peaceful handegg)
         ItemContainer inv = client.getItemContainer(InventoryID.INVENTORY);
@@ -568,7 +578,11 @@ public class GnomeballPlugin extends Plugin
         Item item = inv.getItem(event.getParam0());
         if (item == null) return;
         int itemId = item.getId();
-        if (itemId != GNOMEBALL_ITEM_ID && itemId != PEACEFUL_HANDEGG_ITEM_ID) return;
+        if (itemId != GNOMEBALL_ITEM_ID && itemId != PEACEFUL_HANDEGG_ITEM_ID)
+        {
+            log.debug("Pass blocked: item id {} is not a gnomeball/handegg", itemId);
+            return;
+        }
 
         // Target must have a free weapon slot
         if (!(event.getMenuEntry().getActor() instanceof Player)) return;
@@ -576,13 +590,23 @@ public class GnomeballPlugin extends Plugin
         if (target == null || target.getName() == null) return;
 
         PlayerComposition comp = target.getPlayerComposition();
-        if (comp == null) return;
+        if (comp == null)
+        {
+            log.debug("Pass blocked: no PlayerComposition available yet for target {}", target.getName());
+            return;
+        }
         int[] equipIds = comp.getEquipmentIds();
-        if (equipIds == null || equipIds[KitType.WEAPON.getIndex()] != 0) return;
+        if (equipIds == null || equipIds[KitType.WEAPON.getIndex()] != 0)
+        {
+            log.debug("Pass blocked: target {} does not have a free weapon slot (weaponSlotId={})",
+                target.getName(), equipIds == null ? "null" : equipIds[KitType.WEAPON.getIndex()]);
+            return;
+        }
 
         String targetRsn = Text.toJagexName(target.getName());
         if (targetRsn == null || targetRsn.isBlank()) return;
 
+        log.debug("Gnomeball pass: {} -> {}", localRsn, targetRsn);
         onPassBallClicked(targetRsn);
     }
 
