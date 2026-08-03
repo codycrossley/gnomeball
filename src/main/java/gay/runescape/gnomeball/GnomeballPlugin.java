@@ -24,9 +24,6 @@ import net.runelite.api.Actor;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
-import net.runelite.api.InventoryID;
-import net.runelite.api.Item;
-import net.runelite.api.ItemContainer;
 import net.runelite.api.Menu;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
@@ -560,7 +557,7 @@ public class GnomeballPlugin extends Plugin
         // Must currently hold the ball
         if (ballHolder == null || !ballHolder.equalsIgnoreCase(localRsn))
         {
-            log.debug("Pass blocked: {} does not currently hold the ball (holder={})", localRsn, ballHolder);
+            debugPass("Pass blocked: " + localRsn + " does not currently hold the ball (holder=" + ballHolder + ")");
             return;
         }
 
@@ -568,19 +565,18 @@ public class GnomeballPlugin extends Plugin
         GnomeballRole myRole = rosterReducer.getRole(localRsn);
         if (myRole != GnomeballRole.TEAM_A && myRole != GnomeballRole.TEAM_B)
         {
-            log.debug("Pass blocked: {} is not an enlisted team player (role={})", localRsn, myRole);
+            debugPass("Pass blocked: " + localRsn + " is not an enlisted team player (role=" + myRole + ")");
             return;
         }
 
-        // Must be throwing a gnomeball (or the F2P-friendly Peaceful handegg)
-        ItemContainer inv = client.getItemContainer(InventoryID.INVENTORY);
-        if (inv == null) return;
-        Item item = inv.getItem(event.getParam0());
-        if (item == null) return;
-        int itemId = item.getId();
+        // Must be throwing a gnomeball (or the F2P-friendly Peaceful handegg). Read straight off
+        // the menu entry rather than re-deriving via inventory slot -- the slot can drift between
+        // when the entry was built and when the click resolves (item consumed/reordered in
+        // between), which was silently matching whatever unrelated item ended up in that slot.
+        int itemId = event.getItemId();
         if (itemId != GNOMEBALL_ITEM_ID && itemId != PEACEFUL_HANDEGG_ITEM_ID)
         {
-            log.debug("Pass blocked: item id {} is not a gnomeball/handegg", itemId);
+            debugPass("Pass blocked: item id " + itemId + " is not a gnomeball/handegg");
             return;
         }
 
@@ -592,22 +588,30 @@ public class GnomeballPlugin extends Plugin
         PlayerComposition comp = target.getPlayerComposition();
         if (comp == null)
         {
-            log.debug("Pass blocked: no PlayerComposition available yet for target {}", target.getName());
+            debugPass("Pass blocked: no PlayerComposition available yet for target " + target.getName());
             return;
         }
         int[] equipIds = comp.getEquipmentIds();
         if (equipIds == null || equipIds[KitType.WEAPON.getIndex()] != 0)
         {
-            log.debug("Pass blocked: target {} does not have a free weapon slot (weaponSlotId={})",
-                target.getName(), equipIds == null ? "null" : equipIds[KitType.WEAPON.getIndex()]);
+            debugPass("Pass blocked: target " + target.getName() + " does not have a free weapon slot (weaponSlotId="
+                + (equipIds == null ? "null" : equipIds[KitType.WEAPON.getIndex()]) + ")");
             return;
         }
 
         String targetRsn = Text.toJagexName(target.getName());
         if (targetRsn == null || targetRsn.isBlank()) return;
 
-        log.debug("Gnomeball pass: {} -> {}", localRsn, targetRsn);
+        debugPass("Gnomeball pass: " + localRsn + " -> " + targetRsn);
         onPassBallClicked(targetRsn);
+    }
+
+    /** Dev-only helper: mirrors a pass-ball debug message to both the RuneLite log and the
+     * in-game chatbox, since tailing a log file mid-match is impractical. */
+    private void debugPass(String message)
+    {
+        log.debug(message);
+        addChatMessage("[Pass debug] " + message);
     }
 
     @Subscribe
