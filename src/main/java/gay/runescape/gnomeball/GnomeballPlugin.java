@@ -71,9 +71,10 @@ public class GnomeballPlugin extends Plugin
 
     private static final int    GNOMEBALL_ITEM_ID = 751;
     private static final int    PEACEFUL_HANDEGG_ITEM_ID = 22358; // F2P-accessible substitute for the Gnomeball
-    // Animation id played by the local player when the throw actually lands. Confirmed via the
-    // "Pass-pending animation observed" debug lines in checkPendingThrow().
-    private static final int    GNOMEBALL_THROW_ANIMATION_ID = 7995;
+    // Animation id played by the local player when the throw actually lands -- different per item,
+    // confirmed via the "Pass-pending animation observed" debug lines in checkPendingThrow().
+    private static final int    GNOMEBALL_THROW_ANIMATION_ID = 783;
+    private static final int    HANDEGG_THROW_ANIMATION_ID = 7995;
     private static final long   THROW_CONFIRM_WINDOW_MS = 2000; // Time waited to check if throwing animation is triggered
     private static final String COLOR_REFEREE = "3CB34A";
     private static final String COLOR_TEAM_A  = "3C78DC";
@@ -177,6 +178,7 @@ public class GnomeballPlugin extends Plugin
     private volatile String ballHolder   = null;
     private volatile String pendingThrowTarget = null; // staged pass awaiting throw-animation confirmation
     private volatile long   pendingThrowDeadline = 0;
+    private volatile int    pendingThrowItemId = -1; // itemId used for the staged pass -- see checkPendingThrow
     private volatile String tagObligationTagger = null;
     private volatile String tagImmunePlayer = null;
     private volatile long   tagImmuneUntil = 0;
@@ -636,6 +638,7 @@ public class GnomeballPlugin extends Plugin
         debugPass("Gnomeball pass staged: " + localRsn + " -> " + targetRsn + " (itemId=" + heldItemId
             + "), awaiting throw animation to confirm");
         pendingThrowTarget = targetRsn;
+        pendingThrowItemId = heldItemId;
         pendingThrowDeadline = System.currentTimeMillis() + THROW_CONFIRM_WINDOW_MS;
     }
 
@@ -677,7 +680,9 @@ public class GnomeballPlugin extends Plugin
         }
 
         int animId = actor.getAnimation();
-        if (animId != GNOMEBALL_THROW_ANIMATION_ID) return;
+        int expectedAnimId = pendingThrowItemId == PEACEFUL_HANDEGG_ITEM_ID
+            ? HANDEGG_THROW_ANIMATION_ID : GNOMEBALL_THROW_ANIMATION_ID;
+        if (animId != expectedAnimId) return;
 
         pendingThrowTarget = null;
         onPassBallClicked(target);
