@@ -816,7 +816,7 @@ public class GnomeballPlugin extends Plugin
         List<ApiClient.TileSpec> tileSpecs = new ArrayList<>(placedTiles.size());
         for (FieldPreset.PlacedTile pt : placedTiles)
         {
-            tileSpecs.add(new ApiClient.TileSpec(pt.point.getX(), pt.point.getY(), pt.point.getPlane(), pt.tileType, pt.color));
+            tileSpecs.add(new ApiClient.TileSpec(pt.point.getX(), pt.point.getY(), pt.point.getPlane(), pt.tileType, pt.color, pt.orientation));
         }
 
         executor.submit(() ->

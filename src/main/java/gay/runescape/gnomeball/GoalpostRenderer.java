@@ -36,9 +36,12 @@ public class GoalpostRenderer
 
     // RuneLiteObjectController orientation is an unsigned Jagex Angle Unit -- 2048 per full turn
     // (0-2047), so 512 = 90 degrees. A negative value here is out of range and crashed the client,
-    // so -90 degrees is expressed as 2048 - 512 = 1536 instead.
-    private static final int ORIENTATION_TEAM_A = 1536;
-    private static final int ORIENTATION_TEAM_B = 512;
+    // so -90 degrees is expressed as 2048 - 512 = 1536 instead. The real orientation now travels
+    // with the tile itself (see TileEntry.orientation, rotated alongside position in
+    // FieldPreset#layout) so it rotates along with the field -- these are only a fallback for a
+    // tile that somehow has no orientation recorded.
+    private static final int DEFAULT_ORIENTATION_TEAM_A = 1536;
+    private static final int DEFAULT_ORIENTATION_TEAM_B = 512;
 
     private static final int RGB_TEAM_A = 0x3C78DC; // matches GnomeballPlugin.COLOR_TEAM_A
     private static final int RGB_TEAM_B = 0xC83C3C; // matches GnomeballPlugin.COLOR_TEAM_B
@@ -89,7 +92,8 @@ public class GoalpostRenderer
             TileReducer.TileEntry entry = e.getValue();
             boolean isTeamA = "GOALPOST_A".equals(entry.tileType);
             Model model = isTeamA ? cachedModelA : cachedModelB;
-            int orientation = isTeamA ? ORIENTATION_TEAM_A : ORIENTATION_TEAM_B;
+            int fallback = isTeamA ? DEFAULT_ORIENTATION_TEAM_A : DEFAULT_ORIENTATION_TEAM_B;
+            int orientation = entry.orientation != null ? entry.orientation : fallback;
 
             RuneLiteObject obj = active.computeIfAbsent(e.getKey(), k ->
             {

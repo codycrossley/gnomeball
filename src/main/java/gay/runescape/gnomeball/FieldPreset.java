@@ -34,9 +34,11 @@ public final class FieldPreset
     /**
      * Rotates and translates this preset's tiles onto {@code center}, {@code rotationSteps}
      * quarter-turns clockwise (0-3: 0/90/180/270 degrees), via the standard clockwise transform
-     * (dx,dy) -> (dy,-dx). Every current tile type (FIELD/ZONE_A/ZONE_B/CHEERLEADER_A/CHEERLEADER_B/
-     * GOALPOST_A/GOALPOST_B) is non-directional, so only position rotates — type and color pass
-     * through unchanged. This is
+     * (dx,dy) -> (dy,-dx). Most tile types (FIELD/ZONE_A/ZONE_B/CHEERLEADER_A/CHEERLEADER_B) are
+     * non-directional, so only position rotates for them — type and color pass through unchanged.
+     * GOALPOST_A/GOALPOST_B carry a base facing (see {@link GoalpostRenderer}), which rotates
+     * alongside position by the same 90-degrees-per-step amount (512 Jagex Angle Units), so the
+     * spawned 3D model keeps facing the same way relative to the field after a rotation. This is
      * the single source of truth for preset geometry, used identically by the live placement
      * preview and the actual commit so they can never disagree.
      */
@@ -56,7 +58,8 @@ public final class FieldPreset
                 dx = ndx;
                 dy = ndy;
             }
-            placed.add(new PlacedTile(new WorldPoint(center.getX() + dx, center.getY() + dy, plane), rt.tileType, rt.color));
+            Integer orientation = rt.orientation == null ? null : ((rt.orientation + steps * 512) % 2048 + 2048) % 2048;
+            placed.add(new PlacedTile(new WorldPoint(center.getX() + dx, center.getY() + dy, plane), rt.tileType, rt.color, orientation));
         }
         return placed;
     }
@@ -102,7 +105,7 @@ public final class FieldPreset
         for (TileReducer.TileEntry e : snapshot)
         {
             if (e.point.getPlane() != majorityPlane) continue;
-            relTiles.add(new RelativeTile(e.point.getX() - anchorX, e.point.getY() - anchorY, e.tileType, e.color));
+            relTiles.add(new RelativeTile(e.point.getX() - anchorX, e.point.getY() - anchorY, e.tileType, e.color, e.orientation));
         }
         return new FieldPreset(name, relTiles);
     }
@@ -112,13 +115,20 @@ public final class FieldPreset
         public final int dx, dy;
         public final String tileType;
         public final String color;
+        public final Integer orientation; // nullable -- base facing, GOALPOST_A/B only
 
         public RelativeTile(int dx, int dy, String tileType, String color)
+        {
+            this(dx, dy, tileType, color, null);
+        }
+
+        public RelativeTile(int dx, int dy, String tileType, String color, Integer orientation)
         {
             this.dx = dx;
             this.dy = dy;
             this.tileType = tileType;
             this.color = color;
+            this.orientation = orientation;
         }
     }
 
@@ -127,12 +137,14 @@ public final class FieldPreset
         public final WorldPoint point;
         public final String tileType;
         public final String color;
+        public final Integer orientation; // nullable -- rotated facing, GOALPOST_A/B only
 
-        PlacedTile(WorldPoint point, String tileType, String color)
+        PlacedTile(WorldPoint point, String tileType, String color, Integer orientation)
         {
             this.point = point;
             this.tileType = tileType;
             this.color = color;
+            this.orientation = orientation;
         }
     }
 
@@ -321,7 +333,7 @@ public final class FieldPreset
         tiles.add(new RelativeTile(-11, 0, "FIELD", null));
         tiles.add(new RelativeTile(-10, 0, "FIELD", null));
         tiles.add(new RelativeTile(-10, 0, "ZONE_A", null));
-        tiles.add(new RelativeTile(-10, 0, "GOALPOST_A", null));
+        tiles.add(new RelativeTile(-10, 0, "GOALPOST_A", null, 1536));
         tiles.add(new RelativeTile(-9, 0, "FIELD", null));
         tiles.add(new RelativeTile(-8, 0, "FIELD", null));
         tiles.add(new RelativeTile(-7, 0, "FIELD", null));
@@ -343,7 +355,7 @@ public final class FieldPreset
         tiles.add(new RelativeTile(9, 0, "FIELD", null));
         tiles.add(new RelativeTile(10, 0, "FIELD", null));
         tiles.add(new RelativeTile(10, 0, "ZONE_B", null));
-        tiles.add(new RelativeTile(10, 0, "GOALPOST_B", null));
+        tiles.add(new RelativeTile(10, 0, "GOALPOST_B", null, 512));
         tiles.add(new RelativeTile(11, 0, "FIELD", null));
         tiles.add(new RelativeTile(-11, -1, "FIELD", null));
         tiles.add(new RelativeTile(-10, -1, "FIELD", null));

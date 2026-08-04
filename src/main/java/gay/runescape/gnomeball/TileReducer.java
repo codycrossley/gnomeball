@@ -15,12 +15,14 @@ public class TileReducer
         public final WorldPoint point;
         public final String tileType;
         public final String color;
+        public final Integer orientation; // Jagex Angle Units, 0-2047 -- GOALPOST_A/B only, else null
 
-        public TileEntry(WorldPoint point, String tileType, String color)
+        public TileEntry(WorldPoint point, String tileType, String color, Integer orientation)
         {
             this.point = point;
             this.tileType = tileType;
             this.color = color;
+            this.orientation = orientation;
         }
     }
 
@@ -68,9 +70,10 @@ public class TileReducer
         String tileType = safeStr(tile, "tileType");
         if (tileType == null) return; // server always requires/validates a real tileType
         String color = safeStr(tile, "color");
+        Integer orientation = safeInt(tile, "orientation");
 
         tiles.put(key(x, y, plane, tileType),
-            new TileEntry(new WorldPoint(x, y, plane), tileType, color));
+            new TileEntry(new WorldPoint(x, y, plane), tileType, color, orientation));
     }
 
     private void applyUnmark(JsonObject tile)
@@ -105,7 +108,7 @@ public class TileReducer
         {
             if (t == null || t.tileType == null) continue; // server always requires/validates a real tileType
             tiles.put(key(t.x, t.y, t.plane, t.tileType),
-                new TileEntry(new WorldPoint(t.x, t.y, t.plane), t.tileType, t.color));
+                new TileEntry(new WorldPoint(t.x, t.y, t.plane), t.tileType, t.color, t.orientation));
         }
     }
 

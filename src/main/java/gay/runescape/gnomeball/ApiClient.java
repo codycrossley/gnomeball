@@ -269,6 +269,7 @@ public class ApiClient
             tileObj.addProperty("plane", t.plane);
             tileObj.addProperty("tileType", t.tileType);
             if (t.color != null) tileObj.addProperty("color", t.color);
+            if (t.orientation != null) tileObj.addProperty("orientation", t.orientation);
             arr.add(tileObj);
         }
         JsonObject body = new JsonObject();
@@ -473,14 +474,16 @@ public class ApiClient
         public final int x, y, plane;
         public final String tileType;
         public final String color; // nullable
+        public final Integer orientation; // nullable -- Jagex Angle Units, GOALPOST_A/B only
 
-        public TileSpec(int x, int y, int plane, String tileType, String color)
+        public TileSpec(int x, int y, int plane, String tileType, String color, Integer orientation)
         {
             this.x = x;
             this.y = y;
             this.plane = plane;
             this.tileType = tileType;
             this.color = color;
+            this.orientation = orientation;
         }
     }
 
@@ -571,6 +574,7 @@ public class ApiClient
         public int plane;
         public String tileType;
         public String color;
+        public Integer orientation;
     }
 
     private static class CreateGameResponse
