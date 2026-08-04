@@ -411,12 +411,25 @@ public class GnomeballPlugin extends Plugin
      * color, so e.g. "Follow" or "Trade with" on an enlisted player reads in team colors instead
      * of the client's default (usually white/friend-list) color. Applies during LOBBY and ACTIVE,
      * regardless of the local player's own role — this is purely a legibility aid, not a
-     * restriction, so hosts/observers/referees see the coloring too. */
+     * restriction, so hosts/observers/referees see the coloring too.
+     *
+     * Known conflict: RuneLite's built-in "Player Indicators" plugin also recolors these same
+     * entries' target text and can run after us for the same MenuEntryAdded event, clobbering our
+     * color back to plain. Accepted as-is since this is cosmetic only -- nothing functional
+     * depends on it -- rather than chasing a last-write-wins race against every other plugin that
+     * might touch menu target text the same way. */
     private void colorizeRosterPlayerEntry(MenuEntryAdded event)
     {
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return;
 
         MenuEntry entry = event.getMenuEntry();
+        // "Use <item> -> <player>" packs a multi-segment colored string into target (item name,
+        // arrow, player name, and combat level each in their own <col> span) that the client
+        // renders in a way specific to this entry type -- flattening and rewrapping it the way
+        // the rest of this method does silently drops the player's name instead of just
+        // recoloring, so leave this entry type's target text alone entirely.
+        if (entry.getType() == MenuAction.WIDGET_TARGET_ON_PLAYER) return;
+
         if (!(entry.getActor() instanceof Player)) return;
         Player target = (Player) entry.getActor();
         if (target == null || target.getName() == null) return;
