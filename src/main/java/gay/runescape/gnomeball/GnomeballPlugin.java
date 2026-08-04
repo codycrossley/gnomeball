@@ -441,8 +441,10 @@ public class GnomeballPlugin extends Plugin
 
         if (phase != GamePhase.ACTIVE || timerPaused || ballHolder == null) return;
 
-        // Scoring/turnovers are disabled until the pending obligation is fulfilled
-        if (obligationActive) return;
+        // Scoring/turnovers are disabled until any pending obligation (goal/out-of-bounds delivery,
+        // or returning the ball to whoever tagged you) is fulfilled -- otherwise a tagged ball
+        // holder could just run into a zone and score instead of dealing with the tag.
+        if (obligationActive || tagObligationTagger != null) return;
 
         String localRsn = localRsn();
         if (localRsn == null || !ballHolder.equalsIgnoreCase(localRsn)) return;
@@ -704,6 +706,10 @@ public class GnomeballPlugin extends Plugin
 
         // Only the current ball holder can be tagged
         if (ballHolder == null || !ballHolder.equalsIgnoreCase(selfRsn)) return;
+
+        // Can't be tagged while already owing a goal/out-of-bounds delivery -- otherwise the two
+        // obligations would stack instead of one being resolved first.
+        if (obligationActive) return;
 
         // Brief immunity after receiving the ball back from a fulfilled tag
         if (tagImmunePlayer != null && tagImmunePlayer.equalsIgnoreCase(selfRsn) && System.currentTimeMillis() < tagImmuneUntil) return;
