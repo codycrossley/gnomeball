@@ -111,6 +111,7 @@ public class GnomeballPlugin extends Plugin
     private RosterReducer rosterReducer;
     private TileReducer tileReducer;
     private CheerleaderRenderer cheerleaderRenderer;
+    private GoalpostRenderer goalpostRenderer;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r ->
     {
@@ -217,6 +218,7 @@ public class GnomeballPlugin extends Plugin
         rosterReducer = new RosterReducer();
         tileReducer   = new TileReducer();
         cheerleaderRenderer = new CheerleaderRenderer(client, clientThread, this);
+        goalpostRenderer = new GoalpostRenderer(client, clientThread);
         loadCustomFieldSlots();
         loadHostedGameKeys();
 
@@ -271,6 +273,7 @@ public class GnomeballPlugin extends Plugin
         if (cheerleaderSpeechOverlay != null) overlayManager.remove(cheerleaderSpeechOverlay);
         if (navButton != null) clientToolbar.removeNavigation(navButton);
         if (cheerleaderRenderer != null) cheerleaderRenderer.clear();
+        if (goalpostRenderer != null) goalpostRenderer.clear();
         resetState();
     }
 
@@ -323,6 +326,7 @@ public class GnomeballPlugin extends Plugin
             if (rosterReducer != null) rosterReducer.reset();
             if (tileReducer != null) tileReducer.reset();
             if (cheerleaderRenderer != null) cheerleaderRenderer.clear();
+            if (goalpostRenderer != null) goalpostRenderer.clear();
             SwingUtilities.invokeLater(() -> panel.refresh());
         }
     }
@@ -437,6 +441,7 @@ public class GnomeballPlugin extends Plugin
         if (phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE)
         {
             cheerleaderRenderer.sync(tileReducer.snapshot());
+            goalpostRenderer.sync(tileReducer.snapshot());
         }
 
         if (phase != GamePhase.ACTIVE || timerPaused || ballHolder == null) return;
@@ -456,8 +461,11 @@ public class GnomeballPlugin extends Plugin
         WorldPoint pos = client.getLocalPlayer().getWorldLocation();
         String scoringTeam = myRole == GnomeballRole.TEAM_A ? "TEAM_A" : "TEAM_B";
 
+        // GOALPOST_A/GOALPOST_B behave identically to ZONE_A/ZONE_B for scoring — they're a zone
+        // with a recolored goalpost model standing on it, not a separate scoring concept.
         String zoneType = myRole == GnomeballRole.TEAM_A ? "ZONE_A" : "ZONE_B";
-        if (tileReducer.hasMarker(pos, zoneType))
+        String goalpostType = myRole == GnomeballRole.TEAM_A ? "GOALPOST_A" : "GOALPOST_B";
+        if (tileReducer.hasMarker(pos, zoneType) || tileReducer.hasMarker(pos, goalpostType))
         {
             onZoneScore(scoringTeam, pos);
             return;
@@ -1880,6 +1888,7 @@ public class GnomeballPlugin extends Plugin
         if (rosterReducer != null) rosterReducer.reset();
         if (tileReducer != null) tileReducer.reset();
         if (cheerleaderRenderer != null) cheerleaderRenderer.clear();
+        if (goalpostRenderer != null) goalpostRenderer.clear();
     }
 
     private void loadTiles()

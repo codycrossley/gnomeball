@@ -136,11 +136,14 @@ public class TileReducer
         return false;
     }
 
-    /** Whether {@code wp} itself is marked FIELD, ZONE_A, or ZONE_B — an exact per-tile check,
-     * not an approximation, since those tile types now cover the field's actual footprint. */
+    /** Whether {@code wp} itself is marked FIELD, ZONE_A, ZONE_B, GOALPOST_A, or GOALPOST_B — an
+     * exact per-tile check, not an approximation, since those tile types now cover the field's
+     * actual footprint. GOALPOST_A/GOALPOST_B behave identically to ZONE_A/ZONE_B here — they're
+     * a zone with a 3D model standing on it, not a separate footprint concept. */
     public boolean isWithinField(WorldPoint wp)
     {
-        return hasMarker(wp, "FIELD") || hasMarker(wp, "ZONE_A") || hasMarker(wp, "ZONE_B");
+        return hasMarker(wp, "FIELD") || hasMarker(wp, "ZONE_A") || hasMarker(wp, "ZONE_B")
+            || hasMarker(wp, "GOALPOST_A") || hasMarker(wp, "GOALPOST_B");
     }
 
     /** Whether the host has marked out any field/zone tiles at all. Out-of-bounds detection
@@ -151,7 +154,8 @@ public class TileReducer
         for (TileEntry e : tiles.values())
         {
             String t = e.tileType;
-            if ("FIELD".equals(t) || "ZONE_A".equals(t) || "ZONE_B".equals(t)) return true;
+            if ("FIELD".equals(t) || "ZONE_A".equals(t) || "ZONE_B".equals(t)
+                || "GOALPOST_A".equals(t) || "GOALPOST_B".equals(t)) return true;
         }
         return false;
     }

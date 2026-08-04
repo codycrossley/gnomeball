@@ -34,8 +34,11 @@ public class TileOverlay extends Overlay
      * each tile individually filled — these tend to cover large areas, and filling every tile
      * solid reads as an overwhelming wash of color. Order matters: drawn in this sequence, so a
      * zone edge coinciding with a field edge (e.g. a zone tile sitting right at the field's outer
-     * boundary) draws on top and wins — zones take rendering priority over the field they sit on. */
-    private static final List<String> OUTLINE_TYPES = List.of("FIELD", "ZONE_A", "ZONE_B");
+     * boundary) draws on top and wins — zones take rendering priority over the field they sit on.
+     * GOALPOST_A/GOALPOST_B get the exact same outline treatment as ZONE_A/ZONE_B — they're a zone
+     * with a recolored 3D goalpost model standing on it (see {@link GoalpostRenderer}), not a
+     * separate visual category. */
+    private static final List<String> OUTLINE_TYPES = List.of("FIELD", "ZONE_A", "ZONE_B", "GOALPOST_A", "GOALPOST_B");
 
     private static final Stroke SOLID_STROKE   = new BasicStroke(2f);
     private static final Stroke PREVIEW_STROKE = new BasicStroke(2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, new float[]{6f, 4f}, 0f);
@@ -239,10 +242,11 @@ public class TileOverlay extends Overlay
         }
     }
 
-    /** FIELD tiles treat neighboring ZONE_A/ZONE_B tiles as part of the same region — zones are
-     * conceptually part of the field, so FIELD's own outline should only appear where it meets
-     * genuinely unmarked ground, not at a zone boundary (which the zone's own strictly-same-type
-     * outline already draws). Every other type only connects to itself. */
+    /** FIELD tiles treat neighboring ZONE_A/ZONE_B/GOALPOST_A/GOALPOST_B tiles as part of the same
+     * region — zones (and goalposts, which behave identically) are conceptually part of the field,
+     * so FIELD's own outline should only appear where it meets genuinely unmarked ground, not at a
+     * zone boundary (which the zone's own strictly-same-type outline already draws). Every other
+     * type only connects to itself. */
     private static Set<WorldPoint> connectivityFor(String type, Map<String, Set<WorldPoint>> byType)
     {
         if (!"FIELD".equals(type)) return byType.getOrDefault(type, Set.of());
@@ -250,6 +254,8 @@ public class TileOverlay extends Overlay
         Set<WorldPoint> connected = new HashSet<>(byType.getOrDefault("FIELD", Set.of()));
         connected.addAll(byType.getOrDefault("ZONE_A", Set.of()));
         connected.addAll(byType.getOrDefault("ZONE_B", Set.of()));
+        connected.addAll(byType.getOrDefault("GOALPOST_A", Set.of()));
+        connected.addAll(byType.getOrDefault("GOALPOST_B", Set.of()));
         return connected;
     }
 
@@ -333,8 +339,8 @@ public class TileOverlay extends Overlay
     private static Color defaultColorFor(String tileType)
     {
         if ("FIELD".equals(tileType)) return COLOR_FIELD;
-        if ("ZONE_A".equals(tileType)) return COLOR_ZONE_A;
-        if ("ZONE_B".equals(tileType)) return COLOR_ZONE_B;
+        if ("ZONE_A".equals(tileType) || "GOALPOST_A".equals(tileType)) return COLOR_ZONE_A;
+        if ("ZONE_B".equals(tileType) || "GOALPOST_B".equals(tileType)) return COLOR_ZONE_B;
         return COLOR_UNKNOWN_TYPE;
     }
 
