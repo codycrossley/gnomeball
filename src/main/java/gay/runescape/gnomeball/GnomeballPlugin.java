@@ -19,13 +19,13 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
+import javax.inject.Named;
 import javax.swing.SwingUtilities;
 import net.runelite.api.Actor;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.InventoryID;
-import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.Menu;
 import net.runelite.api.MenuAction;
@@ -52,7 +52,9 @@ import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
 import okhttp3.OkHttpClient;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @PluginDescriptor(name = "Gnomeball")
 public class GnomeballPlugin extends Plugin
 {
@@ -69,8 +71,12 @@ public class GnomeballPlugin extends Plugin
     private static final int CUSTOM_SLOT_COUNT = 3;
     private static final int MAX_REMEMBERED_HOST_GAMES = 5;
 
-    private static final int    GNOMEBALL_ITEM_ID = 2528;
-    private static final int    PEACEFUL_HANDEGG_ITEM_ID = 9470; // F2P-accessible substitute for the Gnomeball
+    private static final int    GNOMEBALL_ITEM_ID = 751;
+    private static final int    PEACEFUL_HANDEGG_ITEM_ID = 22358; // F2P-accessible substitute for the Gnomeball
+    // Animation id played by the local player when the throw actually lands. Confirmed via the
+    // "Pass-pending animation observed" debug lines in checkPendingThrow().
+    private static final int    GNOMEBALL_THROW_ANIMATION_ID = 7995;
+    private static final long   THROW_CONFIRM_WINDOW_MS = 2000; // Time waited to check if throwing animation is triggered
     private static final String COLOR_REFEREE = "3CB34A";
     private static final String COLOR_TEAM_A  = "3C78DC";
     private static final String COLOR_TEAM_B  = "C83C3C";
@@ -84,6 +90,7 @@ public class GnomeballPlugin extends Plugin
     private static final long   TAG_IMMUNITY_MS = 1200; // 2 game ticks @ 600ms each
 
     @Inject private Client client;
+    @Inject @Named("developerMode") private boolean developerMode;
     @Inject private ClientThread clientThread;
     @Inject private ConfigManager configManager;
     @Inject private GnomeballConfig config;
@@ -169,6 +176,8 @@ public class GnomeballPlugin extends Plugin
     private final FieldPreset[] customSlots = new FieldPreset[CUSTOM_SLOT_COUNT]; // null = empty slot
     private volatile WorldPoint lastSelfPosition = null;
     private volatile String ballHolder   = null;
+    private volatile String pendingThrowTarget = null; // staged pass awaiting throw-animation confirmation
+    private volatile long   pendingThrowDeadline = 0;
     private volatile String tagObligationTagger = null;
     private volatile String tagImmunePlayer = null;
     private volatile long   tagImmuneUntil = 0;
@@ -556,19 +565,39 @@ public class GnomeballPlugin extends Plugin
         if (localRsn == null) return;
 
         // Must currently hold the ball
-        if (ballHolder == null || !ballHolder.equalsIgnoreCase(localRsn)) return;
+        if (ballHolder == null || !ballHolder.equalsIgnoreCase(localRsn))
+        {
+            debugPass("Pass blocked: " + localRsn + " does not currently hold the ball (holder=" + ballHolder + ")");
+            return;
+        }
 
         // Must be an enlisted team player
         GnomeballRole myRole = rosterReducer.getRole(localRsn);
-        if (myRole != GnomeballRole.TEAM_A && myRole != GnomeballRole.TEAM_B) return;
+        if (myRole != GnomeballRole.TEAM_A && myRole != GnomeballRole.TEAM_B)
+        {
+            debugPass("Pass blocked: " + localRsn + " is not an enlisted team player (role=" + myRole + ")");
+            return;
+        }
 
-        // Must be throwing a gnomeball (or the F2P-friendly Peaceful handegg)
+        // Must be throwing a gnomeball (or the F2P-friendly Peaceful handegg). Checked by presence
+        // anywhere in the inventory OR the local player's own weapon slot -- once caught from a
+        // previous throw, the ball ends up equipped in the weapon slot rather than sitting in the
+        // inventory, so a second-or-later pass needs to check both places. Not derived from
+        // event.getParam0() as a slot index, since that slot could belong to either container
+        // depending on where the click actually originated, and getItemId() isn't populated for
+        // WIDGET_TARGET_ON_PLAYER (that's an ITEM_USE_ON_PLAYER-only field, always -1 here).
         ItemContainer inv = client.getItemContainer(InventoryID.INVENTORY);
-        if (inv == null) return;
-        Item item = inv.getItem(event.getParam0());
-        if (item == null) return;
-        int itemId = item.getId();
-        if (itemId != GNOMEBALL_ITEM_ID && itemId != PEACEFUL_HANDEGG_ITEM_ID) return;
+        boolean hasGnomeball = inv != null && inv.contains(GNOMEBALL_ITEM_ID);
+        boolean hasHandegg = inv != null && inv.contains(PEACEFUL_HANDEGG_ITEM_ID);
+        Player localPlayer = client.getLocalPlayer();
+        int equippedItemId = equippedWeaponItemId(localPlayer != null ? localPlayer.getPlayerComposition() : null);
+        boolean hasEquipped = equippedItemId == GNOMEBALL_ITEM_ID || equippedItemId == PEACEFUL_HANDEGG_ITEM_ID;
+        if (!hasGnomeball && !hasHandegg && !hasEquipped)
+        {
+            debugPass("Pass blocked: " + localRsn + " is not holding a gnomeball/handegg");
+            return;
+        }
+        int heldItemId = hasGnomeball ? GNOMEBALL_ITEM_ID : hasHandegg ? PEACEFUL_HANDEGG_ITEM_ID : equippedItemId;
 
         // Target must have a free weapon slot
         if (!(event.getMenuEntry().getActor() instanceof Player)) return;
@@ -576,14 +605,84 @@ public class GnomeballPlugin extends Plugin
         if (target == null || target.getName() == null) return;
 
         PlayerComposition comp = target.getPlayerComposition();
-        if (comp == null) return;
-        int[] equipIds = comp.getEquipmentIds();
-        if (equipIds == null || equipIds[KitType.WEAPON.getIndex()] != 0) return;
+        if (comp == null)
+        {
+            debugPass("Pass blocked: no PlayerComposition available yet for target " + target.getName());
+            return;
+        }
+        if (equippedWeaponItemId(comp) != -1)
+        {
+            debugPass("Pass blocked: target " + target.getName() + " does not have a free weapon slot (weaponItemId="
+                + equippedWeaponItemId(comp) + ")");
+            return;
+        }
 
         String targetRsn = Text.toJagexName(target.getName());
         if (targetRsn == null || targetRsn.isBlank()) return;
 
-        onPassBallClicked(targetRsn);
+        // Stage the pass rather than firing it immediately -- checkPendingThrow() (called from
+        // onAnimationChanged below) confirms it once the local player's throw animation actually
+        // plays, instead of trusting the menu click alone. Expires after THROW_CONFIRM_WINDOW_MS
+        // if no matching animation shows up (e.g. the click got swallowed by the game for some
+        // other reason).
+        debugPass("Gnomeball pass staged: " + localRsn + " -> " + targetRsn + " (itemId=" + heldItemId
+            + "), awaiting throw animation to confirm");
+        pendingThrowTarget = targetRsn;
+        pendingThrowDeadline = System.currentTimeMillis() + THROW_CONFIRM_WINDOW_MS;
+    }
+
+    /** Item id equipped in the weapon slot, or -1 if the slot is empty/unknown. */
+    private static int equippedWeaponItemId(PlayerComposition comp)
+    {
+        if (comp == null) return -1;
+        int[] equipIds = comp.getEquipmentIds();
+        if (equipIds == null) return -1;
+        int weaponSlotId = equipIds[KitType.WEAPON.getIndex()];
+        if (weaponSlotId < PlayerComposition.ITEM_OFFSET) return -1;
+        return weaponSlotId - PlayerComposition.ITEM_OFFSET;
+    }
+
+    /** Confirms (or expires) a pass staged by onMenuOptionClicked, called for every animation
+     * change so it can catch the local player's throw animation whenever it actually lands. */
+    private void checkPendingThrow(Actor actor)
+    {
+        if (pendingThrowTarget == null) return;
+
+        Player localPlayer = client.getLocalPlayer();
+        if (actor != localPlayer) return;
+
+        String target = pendingThrowTarget;
+        long now = System.currentTimeMillis();
+        if (now > pendingThrowDeadline)
+        {
+            debugPass("Gnomeball pass to " + target + " expired waiting for throw animation");
+            pendingThrowTarget = null;
+            return;
+        }
+
+        String selfRsn = localRsn();
+        if (selfRsn == null || ballHolder == null || !ballHolder.equalsIgnoreCase(selfRsn))
+        {
+            debugPass("Gnomeball pass to " + target + " abandoned -- no longer holding the ball");
+            pendingThrowTarget = null;
+            return;
+        }
+
+        int animId = actor.getAnimation();
+        if (animId != GNOMEBALL_THROW_ANIMATION_ID) return;
+
+        pendingThrowTarget = null;
+        onPassBallClicked(target);
+    }
+
+    /** Dev-only helper: mirrors a pass-ball debug message to both the RuneLite log and the
+     * in-game chatbox, since tailing a log file mid-match is impractical. */
+    private void debugPass(String message)
+    {
+        log.debug(message);
+        // Only mirror to chatbox under --developer-mode (see build.gradle's `run` task) -- a normal
+        // sideloaded/production client never has this set, so regular players never see this spam.
+        if (developerMode) addChatMessage("[Pass debug] " + message);
     }
 
     @Subscribe
@@ -594,6 +693,8 @@ public class GnomeballPlugin extends Plugin
         Actor actor = event.getActor();
         if (!(actor instanceof Player)) return;
         if (actor.getAnimation() == -1) return;
+
+        checkPendingThrow(actor);
 
         Player attacker = (Player) actor;
         if (attacker.getName() == null) return;
@@ -633,13 +734,7 @@ public class GnomeballPlugin extends Plugin
         if (!attackerIsTeam || !selfIsTeam || attackerRole == selfRole) return;
 
         // Must be wielding a tagging-eligible item (Rubber chicken / Stale baguette / Beach boxing gloves)
-        PlayerComposition comp = attacker.getPlayerComposition();
-        if (comp == null) return;
-        int[] equipIds = comp.getEquipmentIds();
-        if (equipIds == null) return;
-        int weaponSlotId = equipIds[KitType.WEAPON.getIndex()];
-        if (weaponSlotId < PlayerComposition.ITEM_OFFSET) return;
-        int weaponId = weaponSlotId - PlayerComposition.ITEM_OFFSET;
+        int weaponId = equippedWeaponItemId(attacker.getPlayerComposition());
         if (weaponId != ITEM_RUBBER_CHICKEN && weaponId != ITEM_STALE_BAGUETTE
             && weaponId != ITEM_BEACH_BOXING_GLOVES_YELLOW && weaponId != ITEM_BEACH_BOXING_GLOVES_PINK) return;
 
@@ -1782,6 +1877,7 @@ public class GnomeballPlugin extends Plugin
         phase = GamePhase.DISCONNECTED; deadlineMs = 0; winner = null;
         teamAName = "Team A"; teamBName = "Team B"; teamAScore = 0; teamBScore = 0;
         timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0; ballHolder = null;
+        pendingThrowTarget = null; pendingThrowDeadline = 0;
         tagObligationTagger = null;
         tagImmunePlayer = null; tagImmuneUntil = 0;
         obligationActive = false; obligationTeam = null; obligationKind = null;
