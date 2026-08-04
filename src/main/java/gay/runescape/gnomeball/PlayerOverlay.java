@@ -52,6 +52,14 @@ public class PlayerOverlay extends Overlay
         g.setFont(FontManager.getRunescapeBoldFont());
         FontMetrics fm = g.getFontMetrics();
 
+        // Obligation arrows/labels are an instruction to whoever owes the pass -- a spectator
+        // watching isn't a valid target for one, and seeing "PASS" hovering over someone else's
+        // head could easily read as directed at them, so suppress both entirely for observers.
+        Player localPlayer = client.getLocalPlayer();
+        String localRsn = (localPlayer != null && localPlayer.getName() != null) ? Text.toJagexName(localPlayer.getName()) : null;
+        GnomeballRole localRole = localRsn != null ? roster.getRole(localRsn) : null;
+        boolean showObligationHints = localRole != GnomeballRole.OBSERVER;
+
         for (Player p : client.getPlayers())
         {
             if (p == null || p.getName() == null) continue;
@@ -137,7 +145,7 @@ public class PlayerOverlay extends Overlay
                     owedDelivery = role == opposingRole;
                 }
             }
-            if (owedTag || owedDelivery)
+            if (showObligationHints && (owedTag || owedDelivery))
             {
                 int arrowTipY = hasBall ? topY - 16 : topY;
                 drawTagArrow(g, cx, arrowTipY);
