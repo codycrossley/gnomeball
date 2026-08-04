@@ -64,8 +64,6 @@ public class GnomeballPlugin extends Plugin
     private static final String KEY_WRITE_KEY = "activeWriteKey";
     private static final String KEY_PLAYER_TOKEN = "activePlayerToken";
     private static final String KEY_HOST_RSN  = "activeHostRsn";
-    private static final String KEY_PHASE     = "activePhase";
-    private static final String KEY_DEADLINE  = "activeDeadlineMs";
     private static final String KEY_CUSTOM_FIELD_SLOTS = "customFieldSlots";
     private static final String KEY_HOSTED_GAMES = "hostedGameKeys";
     private static final int CUSTOM_SLOT_COUNT = 3;
@@ -1797,8 +1795,6 @@ public class GnomeballPlugin extends Plugin
         configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_WRITE_KEY, writeKey != null ? writeKey : "");
         configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_PLAYER_TOKEN, playerToken != null ? playerToken : "");
         configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_HOST_RSN,  hostRsn != null ? hostRsn : "");
-        configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_PHASE,     phase.name());
-        configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_DEADLINE,  String.valueOf(deadlineMs));
     }
 
     private void clearSession()
@@ -1808,8 +1804,6 @@ public class GnomeballPlugin extends Plugin
         configManager.unsetRSProfileConfiguration(CONFIG_GROUP, KEY_WRITE_KEY);
         configManager.unsetRSProfileConfiguration(CONFIG_GROUP, KEY_PLAYER_TOKEN);
         configManager.unsetRSProfileConfiguration(CONFIG_GROUP, KEY_HOST_RSN);
-        configManager.unsetRSProfileConfiguration(CONFIG_GROUP, KEY_PHASE);
-        configManager.unsetRSProfileConfiguration(CONFIG_GROUP, KEY_DEADLINE);
     }
 
     private void resumeGameAsync(String savedGameId)
@@ -1830,14 +1824,6 @@ public class GnomeballPlugin extends Plugin
                 String savedPlayerToken = configManager.getRSProfileConfiguration(CONFIG_GROUP, KEY_PLAYER_TOKEN, String.class);
                 playerToken = (savedPlayerToken != null && !savedPlayerToken.isEmpty()) ? savedPlayerToken : null;
                 hostRsn  = configManager.getRSProfileConfiguration(CONFIG_GROUP, KEY_HOST_RSN, String.class);
-
-                String savedPhaseStr = configManager.getRSProfileConfiguration(CONFIG_GROUP, KEY_PHASE, String.class);
-                try { phase = savedPhaseStr != null ? GamePhase.valueOf(savedPhaseStr) : GamePhase.LOBBY; }
-                catch (IllegalArgumentException ignored) { phase = GamePhase.LOBBY; }
-
-                String savedDeadlineStr = configManager.getRSProfileConfiguration(CONFIG_GROUP, KEY_DEADLINE, String.class);
-                try { deadlineMs = savedDeadlineStr != null ? Long.parseLong(savedDeadlineStr) : 0; }
-                catch (NumberFormatException ignored) { deadlineMs = 0; }
 
                 eventSocket.start(savedGameId, snap.latestSeq, localRsn());
                 SwingUtilities.invokeLater(() -> panel.refresh());
