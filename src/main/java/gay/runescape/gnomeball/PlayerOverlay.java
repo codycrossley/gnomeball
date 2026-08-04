@@ -17,6 +17,7 @@ public class PlayerOverlay extends Overlay
     private static final Color COLOR_TEAM_B  = new Color(200, 60, 60);
     private static final Color COLOR_TAG_ARROW = new Color(255, 210, 0);
     private static final long  TAG_ARROW_PERIOD_MS = 800;
+    private static final String PASS_LABEL = "PASS";
     private static final Color COLOR_TEAM_A_OUTLINE  = new Color(17, 104, 253, 180);
     private static final Color COLOR_TEAM_B_OUTLINE  = new Color(200, 60, 60, 180);
     private static final Color COLOR_REFEREE_OUTLINE = new Color(60, 179, 74, 180);
@@ -138,7 +139,9 @@ public class PlayerOverlay extends Overlay
             }
             if (owedTag || owedDelivery)
             {
-                drawTagArrow(g, cx, hasBall ? topY - 16 : topY);
+                int arrowTipY = hasBall ? topY - 16 : topY;
+                drawTagArrow(g, cx, arrowTipY);
+                drawPassLabel(g, cx, arrowTipY, fm);
             }
 
             if (isReferee)
@@ -219,6 +222,19 @@ public class PlayerOverlay extends Overlay
 
         g.setColor(new Color(COLOR_TAG_ARROW.getRed(), COLOR_TAG_ARROW.getGreen(), COLOR_TAG_ARROW.getBlue(), (int) (255 * alpha)));
         g.fillPolygon(xs, ys, 3);
+    }
+
+    /** Draws "PASS" centered above {@code cx}, clear of drawTagArrow's full bob range so the two
+     * never overlap regardless of animation phase. */
+    private static void drawPassLabel(Graphics2D g, int cx, int tipY, FontMetrics fm)
+    {
+        int labelWidth = fm.stringWidth(PASS_LABEL);
+        int labelY = tipY - 43;
+
+        g.setColor(Color.BLACK);
+        g.drawString(PASS_LABEL, cx - labelWidth / 2 + 1, labelY + 1);
+        g.setColor(COLOR_TAG_ARROW);
+        g.drawString(PASS_LABEL, cx - labelWidth / 2, labelY);
     }
 
     private static Color roleColor(GnomeballRole role)
