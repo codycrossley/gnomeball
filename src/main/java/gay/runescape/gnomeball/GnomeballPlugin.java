@@ -486,9 +486,9 @@ public class GnomeballPlugin extends Plugin
             return;
         }
 
-        // Only enforced once the host has actually marked out a field — an unmarked field
-        // has no "outside" to step out of.
-        if (tileReducer.hasFieldTiles() && !tileReducer.isWithinField(pos))
+        // Only enforced once the host has actually drawn a FIELD boundary -- a zones/goalposts-only
+        // setup with no FIELD tiles has no "outside" to step out of, so scoring works from anywhere.
+        if (tileReducer.hasFieldBoundary() && !tileReducer.isWithinField(pos))
         {
             onOutOfBounds(scoringTeam, pos);
         }

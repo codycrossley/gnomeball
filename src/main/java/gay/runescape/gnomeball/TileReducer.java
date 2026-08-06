@@ -149,16 +149,17 @@ public class TileReducer
             || hasMarker(wp, "GOALPOST_A") || hasMarker(wp, "GOALPOST_B");
     }
 
-    /** Whether the host has marked out any field/zone tiles at all. Out-of-bounds detection
-     * needs this guard — without it, an unmarked field would mean every position counts as
-     * "outside" the (nonexistent) field, firing an out-of-bounds obligation immediately. */
-    public boolean hasFieldTiles()
+    /** Whether the host has marked out an actual FIELD boundary -- specifically the "FIELD" tile
+     * type, not just any ZONE_A/ZONE_B/GOALPOST_A/GOALPOST_B footprint. Out-of-bounds detection
+     * needs this guard: without a drawn boundary there's no "outside" to have stepped out of, so a
+     * host who's only placed zones/goalposts (no surrounding FIELD) gets a boundary-free setup
+     * where a team can score from anywhere on the map, rather than every non-zone tile on earth
+     * silently counting as "out of bounds". */
+    public boolean hasFieldBoundary()
     {
         for (TileEntry e : tiles.values())
         {
-            String t = e.tileType;
-            if ("FIELD".equals(t) || "ZONE_A".equals(t) || "ZONE_B".equals(t)
-                || "GOALPOST_A".equals(t) || "GOALPOST_B".equals(t)) return true;
+            if ("FIELD".equals(e.tileType)) return true;
         }
         return false;
     }
