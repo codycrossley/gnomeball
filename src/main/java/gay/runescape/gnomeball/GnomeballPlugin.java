@@ -620,7 +620,31 @@ public class GnomeballPlugin extends Plugin
             debugPass("Pass blocked: " + localRsn + " is not holding a gnomeball/handegg");
             return;
         }
-        int heldItemId = hasGnomeball ? GNOMEBALL_ITEM_ID : hasHandegg ? PEACEFUL_HANDEGG_ITEM_ID : equippedItemId;
+
+        // Which item was actually used is read off this entry's target text (e.g.
+        // "Gnomeball -> PlayerName") rather than guessed from inventory contents -- a player
+        // carrying both a Gnomeball and a Peaceful handegg would otherwise always resolve to
+        // whichever item happened to be checked first above regardless of which one was really
+        // clicked, then confirm the pending pass against the wrong throw animation in
+        // checkPendingThrow() and silently expire. The target text is the one place the actual
+        // clicked item is unambiguous for this entry type (see colorizeRosterPlayerEntry's note on
+        // WIDGET_TARGET_ON_PLAYER's "Use <item> -> <player>" target format). Falls back to the old
+        // inventory-presence guess only if the text doesn't name either item, which shouldn't
+        // normally happen for this entry type.
+        String plainTarget = Text.removeTags(event.getMenuEntry().getTarget()).toLowerCase(Locale.ROOT);
+        int heldItemId;
+        if (plainTarget.contains("peaceful handegg"))
+        {
+            heldItemId = PEACEFUL_HANDEGG_ITEM_ID;
+        }
+        else if (plainTarget.contains("gnomeball"))
+        {
+            heldItemId = GNOMEBALL_ITEM_ID;
+        }
+        else
+        {
+            heldItemId = hasGnomeball ? GNOMEBALL_ITEM_ID : hasHandegg ? PEACEFUL_HANDEGG_ITEM_ID : equippedItemId;
+        }
 
         // Target must have a free weapon slot
         if (!(event.getMenuEntry().getActor() instanceof Player)) return;
