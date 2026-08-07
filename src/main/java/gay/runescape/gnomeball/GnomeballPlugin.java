@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Inject;
 import javax.inject.Named;
@@ -87,6 +88,7 @@ public class GnomeballPlugin extends Plugin
     private static final int    ITEM_BEACH_BOXING_GLOVES_YELLOW = 11705;
     private static final int    ITEM_BEACH_BOXING_GLOVES_PINK   = 11706;
     private static final long   TAG_IMMUNITY_MS = 1200; // 2 game ticks @ 600ms each
+    private static final double TAG_LAND_CHANCE = 0.67; // an eligible tag still whiffs occasionally (success 67% of the time)
 
     @Inject private Client client;
     @Inject @Named("developerMode") private boolean developerMode;
@@ -735,6 +737,14 @@ public class GnomeballPlugin extends Plugin
         if (developerMode) addChatMessage("[Pass debug] " + message);
     }
 
+    /** Dev-only helper: mirrors a tag/jab debug message to both the RuneLite log and the in-game
+     * chatbox. See debugPass above for why this doesn't just log. */
+    private void debugTag(String message)
+    {
+        log.debug(message);
+        if (developerMode) addChatMessage("[Tag debug] " + message);
+    }
+
     @Subscribe
     public void onAnimationChanged(AnimationChanged event)
     {
@@ -751,24 +761,46 @@ public class GnomeballPlugin extends Plugin
         String attackerRsn = Text.toJagexName(attacker.getName());
         if (attackerRsn == null || attackerRsn.isBlank()) return;
 
+        // Bystanders with no roster entry at all (not even OBSERVER) aren't part of this game --
+        // bail before any of the logging below so random nearby players don't spam the tag debug
+        // log every time they throw a punch at something unrelated.
+        if (rosterReducer.getRole(attackerRsn) == null) return;
+
         String selfRsn = localRsn();
         if (selfRsn == null) return;
 
         // Only the current ball holder can be tagged
         if (ballHolder == null || !ballHolder.equalsIgnoreCase(selfRsn)) return;
 
+        // Past this point we're the ball holder, so logging is cheap -- this only fires on our
+        // own animation events plus whoever's currently swinging near us, not the whole lobby.
+        debugTag(attackerRsn + " animated near ball holder (anim=" + attacker.getAnimation() + ")");
+
         // Can't be tagged while already owing a goal/out-of-bounds delivery -- otherwise the two
         // obligations would stack instead of one being resolved first.
-        if (obligationActive) return;
+        if (obligationActive)
+        {
+            debugTag("Ignored: obligation already active");
+            return;
+        }
 
         // Brief immunity after receiving the ball back from a fulfilled tag
-        if (tagImmunePlayer != null && tagImmunePlayer.equalsIgnoreCase(selfRsn) && System.currentTimeMillis() < tagImmuneUntil) return;
+        if (tagImmunePlayer != null && tagImmunePlayer.equalsIgnoreCase(selfRsn) && System.currentTimeMillis() < tagImmuneUntil)
+        {
+            debugTag("Ignored: self still tag-immune for " + (tagImmuneUntil - System.currentTimeMillis()) + "ms");
+            return;
+        }
 
-        // The attacker must actually be targeting the local (ball-holding) player.
+        // The attacker must actually be targeting the local (ball-holding) player. Note this can't
+        // be tightened to "did the swing actually land" via a hitsplat -- Gnomeball is played in
+        // normal (non-PvP) areas, so there's no real "Attack" option on other players and no
+        // hitsplat is ever generated here, real or otherwise (see LIMITATIONS.md's "Animation-based
+        // tag detection is broader than 'attacking'" section). Any animation change while adjacent
+        // and wielding a tag prop is the only signal available, false-positive surface and all.
         // getInteracting() can lag a tick behind the animation when the attacker had to walk
-        // into range first, so also accept melee-adjacency as proof they're swinging at us.
+        // into range first, so also accept melee-adjacency as evidence they're swinging at us.
         // Adjacency is checked against both our current position and our position as of the
-        // last tick, since we may have already stepped away by the time the animation lands.
+        // last tick, since we may have already stepped away by the time the animation plays.
         Player localPlayer = client.getLocalPlayer();
         WorldPoint attackerPos = attacker.getWorldLocation();
         boolean targetingMe = localPlayer != null && attacker.getInteracting() == localPlayer;
@@ -779,29 +811,56 @@ public class GnomeballPlugin extends Plugin
         boolean adjacentLastTick = attackerPos != null
             && lastSelfPosition != null
             && attackerPos.distanceTo(lastSelfPosition) <= 1;
-        if (!targetingMe && !adjacentNow && !adjacentLastTick) return;
+        if (!targetingMe && !adjacentNow && !adjacentLastTick)
+        {
+            debugTag("Ignored: not targeting/adjacent (targetingMe=" + targetingMe + " adjacentNow=" + adjacentNow
+                + " adjacentLastTick=" + adjacentLastTick + ")");
+            return;
+        }
 
         GnomeballRole attackerRole = rosterReducer.getRole(attackerRsn);
         GnomeballRole selfRole = rosterReducer.getRole(selfRsn);
         boolean attackerIsTeam = attackerRole == GnomeballRole.TEAM_A || attackerRole == GnomeballRole.TEAM_B;
         boolean selfIsTeam = selfRole == GnomeballRole.TEAM_A || selfRole == GnomeballRole.TEAM_B;
-        if (!attackerIsTeam || !selfIsTeam || attackerRole == selfRole) return;
+        if (!attackerIsTeam || !selfIsTeam || attackerRole == selfRole)
+        {
+            debugTag("Ignored: role mismatch (attackerRole=" + attackerRole + " selfRole=" + selfRole + ")");
+            return;
+        }
 
         // Must be wielding a tagging-eligible item (Rubber chicken / Stale baguette / Beach boxing gloves)
         int weaponId = equippedWeaponItemId(attacker.getPlayerComposition());
         if (weaponId != ITEM_RUBBER_CHICKEN && weaponId != ITEM_STALE_BAGUETTE
-            && weaponId != ITEM_BEACH_BOXING_GLOVES_YELLOW && weaponId != ITEM_BEACH_BOXING_GLOVES_PINK) return;
+            && weaponId != ITEM_BEACH_BOXING_GLOVES_YELLOW && weaponId != ITEM_BEACH_BOXING_GLOVES_PINK)
+        {
+            debugTag("Ignored: attacker not wielding an eligible tagging weapon (weaponId=" + weaponId + ")");
+            return;
+        }
+
+        // An otherwise-eligible jab still only lands TAG_LAND_CHANCE of the time -- rolled locally
+        // on the target's client (the one running this whole check) rather than server-side, same
+        // as every other tag/pass judgment call this plugin makes.
+        if (ThreadLocalRandom.current().nextDouble() >= TAG_LAND_CHANCE)
+        {
+            debugTag("Jab missed: " + attackerRsn + " -> " + selfRsn + " (whiff roll, " + (int) (TAG_LAND_CHANCE * 100) + "% land chance)");
+            return;
+        }
 
         final String gid = gameId;
-        if (gid == null) return;
+        if (gid == null)
+        {
+            debugTag("Ignored: no active gameId to report tag against");
+            return;
+        }
         final String self = selfRsn;
         final String tagger = attackerRsn;
         final String token = playerToken;
 
+        debugTag("Tag detected: " + tagger + " -> " + self + ", reporting to server");
         executor.submit(() ->
         {
             try { apiClient.tagPlayer(gid, tagger, self, token); }
-            catch (Exception ignored) { }
+            catch (Exception e) { debugTag("tagPlayer request failed: " + e); }
         });
     }
 
