@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit;
 
 public class ApiClient
 {
-    static final String BASE_URL = "https://gnomeball.runescape.gay/gnomeball";
+    static final String BASE_URL = "https://gnomeball.shrunk.studio/gnomeball";
     //static final String BASE_URL = "http://localhost:8002/gnomeball";
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
