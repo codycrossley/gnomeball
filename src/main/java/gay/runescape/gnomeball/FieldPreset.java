@@ -168,9 +168,10 @@ public final class FieldPreset
     }
 
     public static final FieldPreset STANDARD_FIELD = buildStandardField();
+    public static final FieldPreset REGULATION_RFL_FIELD = buildRegulationRflField();
     public static final FieldPreset GNOMEBALL_FIELD = buildGnomeballField();
 
-    public static final List<FieldPreset> ALL = List.of(STANDARD_FIELD, GNOMEBALL_FIELD);
+    public static final List<FieldPreset> ALL = List.of(STANDARD_FIELD, REGULATION_RFL_FIELD, GNOMEBALL_FIELD);
 
     /**
      * Generates the 25x10-with-endzones built-in field once into the flat relative-tile
@@ -195,6 +196,25 @@ public final class FieldPreset
         fillRect(tiles, endX - depth + 1, endX, startY, endY, "ZONE_B");
 
         return new FieldPreset("Standard Field (25x10)", tiles);
+    }
+
+    /**
+     * A larger 40x14-with-endzones built-in field, generated the same way as
+     * {@link #buildStandardField} but at regulation-scale dimensions with a shallower 1-tile
+     * endzone depth.
+     */
+    private static FieldPreset buildRegulationRflField()
+    {
+        int width = 40, height = 14, depth = 1;
+        int startX = -(width / 2), startY = -(height / 2);
+        int endX = startX + width - 1, endY = startY + height - 1;
+
+        List<RelativeTile> tiles = new ArrayList<>();
+        fillRect(tiles, startX, endX, startY, endY, "FIELD");
+        fillRect(tiles, startX, startX + depth - 1, startY, endY, "ZONE_A");
+        fillRect(tiles, endX - depth + 1, endX, startY, endY, "ZONE_B");
+
+        return new FieldPreset("Regulation RFL (40x14)", tiles);
     }
 
     /**
