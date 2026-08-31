@@ -214,7 +214,7 @@ public final class FieldPreset
         fillRect(tiles, startX, startX + depth - 1, startY, endY, "ZONE_A");
         fillRect(tiles, endX - depth + 1, endX, startY, endY, "ZONE_B");
 
-        return new FieldPreset("Regulation RFL (40x14)", tiles);
+        return new FieldPreset("RFL (40x14)", tiles);
     }
 
     /**
