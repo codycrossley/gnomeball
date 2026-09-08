@@ -102,8 +102,8 @@ public class TileReducer
 
     public void loadAll(List<ApiClient.TileOut> tileList)
     {
-        tiles.clear();
         if (tileList == null) return;
+        tiles.clear();
         for (ApiClient.TileOut t : tileList)
         {
             if (t == null || t.tileType == null) continue; // server always requires/validates a real tileType
