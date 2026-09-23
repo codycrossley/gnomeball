@@ -120,4 +120,38 @@ public class GoalFlashQueueTest
         assertEquals(2, third.newScore);
         assertEquals(0, q.pendingCount());
     }
+
+    @Test
+    public void optimisticPreviewThenServerEchoOfSameGoalShowsOnce()
+    {
+        // The scorer's own client: onZoneScore's optimistic preview, then GOAL_SCORED's echo of
+        // the very same goal ~200ms later with identical scores.
+        GoalFlashQueue q = new GoalFlashQueue(3000);
+        q.enqueue("TEAM_A", 0, 1, 1_000L);
+        q.enqueue("TEAM_A", 0, 1, 1_200L);
+
+        assertEquals(0, q.pendingCount());
+        assertNull("the echo must not replay once the preview ends", q.current(4_050L));
+    }
+
+    @Test
+    public void duplicateOfAQueuedFlashIsDroppedToo()
+    {
+        GoalFlashQueue q = new GoalFlashQueue(3000);
+        q.enqueue("TEAM_B", 2, 3, 1_000L);
+        q.enqueue("TEAM_A", 0, 1, 1_100L); // preview, queued behind TEAM_B
+        q.enqueue("TEAM_A", 0, 1, 1_300L); // echo of that same goal
+
+        assertEquals(1, q.pendingCount());
+    }
+
+    @Test
+    public void backToBackRealGoalsByTheSameTeamBothPlay()
+    {
+        GoalFlashQueue q = new GoalFlashQueue(3000);
+        q.enqueue("TEAM_A", 0, 1, 1_000L);
+        q.enqueue("TEAM_A", 1, 2, 1_500L); // a different goal -- the score moved on
+
+        assertEquals(1, q.pendingCount());
+    }
 }

@@ -73,21 +73,28 @@ public class ApiClient
         }
     }
 
-    public void startGame(String gameId, String writeKey, int durationSeconds) throws IOException
+    /** {@code token} is either the host's write key or a referee's own player token; when it's
+     * the latter, pass their rsn as {@code actor} too (null otherwise) -- see the server's
+     * require_host_or_referee. Every other host-level method below follows this same shape. */
+    public void startGame(String gameId, String token, int durationSeconds, String actor) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("durationSeconds", durationSeconds);
+        addActor(body, actor);
 
-        try (Response resp = post("/v1/games/" + gameId + "/start", body, writeKey))
+        try (Response resp = post("/v1/games/" + gameId + "/start", body, token))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Start game failed (" + resp.code() + "): " + raw);
         }
     }
 
-    public void endGame(String gameId, String writeKey) throws IOException
+    public void endGame(String gameId, String token, String actor) throws IOException
     {
-        try (Response resp = post("/v1/games/" + gameId + "/end", new JsonObject(), writeKey))
+        JsonObject body = new JsonObject();
+        addActor(body, actor);
+
+        try (Response resp = post("/v1/games/" + gameId + "/end", body, token))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("End game failed (" + resp.code() + "): " + raw);
@@ -175,47 +182,53 @@ public class ApiClient
         }
     }
 
-    public void clearBall(String gameId, String writeKey) throws IOException
+    public void clearBall(String gameId, String token, String actor) throws IOException
     {
-        try (Response resp = post("/v1/games/" + gameId + "/clear-ball", new JsonObject(), writeKey))
+        JsonObject body = new JsonObject();
+        addActor(body, actor);
+
+        try (Response resp = post("/v1/games/" + gameId + "/clear-ball", body, token))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Clear ball failed (" + resp.code() + "): " + raw);
         }
     }
 
-    public void assignBall(String gameId, String writeKey, String playerRsn) throws IOException
+    public void assignBall(String gameId, String token, String playerRsn, String actor) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
+        addActor(body, actor);
 
-        try (Response resp = post("/v1/games/" + gameId + "/assign-ball", body, writeKey))
+        try (Response resp = post("/v1/games/" + gameId + "/assign-ball", body, token))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Assign ball failed (" + resp.code() + "): " + raw);
         }
     }
 
-    public void assignRole(String gameId, String writeKey, String playerRsn, GnomeballRole role) throws IOException
+    public void assignRole(String gameId, String token, String playerRsn, GnomeballRole role, String actor) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("player", playerRsn);
         body.addProperty("role", role.name());
+        addActor(body, actor);
 
-        try (Response resp = post("/v1/games/" + gameId + "/assign-role", body, writeKey))
+        try (Response resp = post("/v1/games/" + gameId + "/assign-role", body, token))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Assign role failed (" + resp.code() + "): " + raw);
         }
     }
 
-    public void renameTeam(String gameId, String writeKey, String team, String name) throws IOException
+    public void renameTeam(String gameId, String token, String team, String name, String actor) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("team", team);
         body.addProperty("name", name);
+        addActor(body, actor);
 
-        try (Response resp = post("/v1/games/" + gameId + "/rename-team", body, writeKey))
+        try (Response resp = post("/v1/games/" + gameId + "/rename-team", body, token))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Rename team failed (" + resp.code() + "): " + raw);
@@ -269,13 +282,14 @@ public class ApiClient
         return "Request failed (" + code + ")";
     }
 
-    public void updateScore(String gameId, String writeKey, String team, int score) throws IOException
+    public void updateScore(String gameId, String token, String team, int score, String actor) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("team", team);
         body.addProperty("score", score);
+        addActor(body, actor);
 
-        try (Response resp = post("/v1/games/" + gameId + "/update-score", body, writeKey))
+        try (Response resp = post("/v1/games/" + gameId + "/update-score", body, token))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Update score failed (" + resp.code() + "): " + raw);
@@ -295,7 +309,7 @@ public class ApiClient
         }
     }
 
-    public void markTile(String gameId, String writeKey, int x, int y, int plane, String tileType, String color) throws IOException
+    public void markTile(String gameId, String token, int x, int y, int plane, String tileType, String color, String actor) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("x", x);
@@ -303,23 +317,25 @@ public class ApiClient
         body.addProperty("plane", plane);
         body.addProperty("tileType", tileType);
         if (color != null) body.addProperty("color", color);
+        addActor(body, actor);
 
-        try (Response resp = post("/v1/games/" + gameId + "/mark-tile", body, writeKey))
+        try (Response resp = post("/v1/games/" + gameId + "/mark-tile", body, token))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Mark tile failed (" + resp.code() + "): " + raw);
         }
     }
 
-    public void unmarkTile(String gameId, String writeKey, int x, int y, int plane, String tileType) throws IOException
+    public void unmarkTile(String gameId, String token, int x, int y, int plane, String tileType, String actor) throws IOException
     {
         JsonObject body = new JsonObject();
         body.addProperty("x", x);
         body.addProperty("y", y);
         body.addProperty("plane", plane);
         if (tileType != null) body.addProperty("tileType", tileType);
+        addActor(body, actor);
 
-        try (Response resp = post("/v1/games/" + gameId + "/unmark-tile", body, writeKey))
+        try (Response resp = post("/v1/games/" + gameId + "/unmark-tile", body, token))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Unmark tile failed (" + resp.code() + "): " + raw);
@@ -329,7 +345,7 @@ public class ApiClient
     /** Batch counterpart to markTile/unmarkTile -- one request for a whole preset's worth of
      * tiles instead of one request per tile, so committing/removing a large preset doesn't mean
      * hundreds of sequential blocking round-trips (see commitPreset/removePreset). */
-    public void markTiles(String gameId, String writeKey, List<TileSpec> tiles) throws IOException
+    public void markTiles(String gameId, String token, List<TileSpec> tiles, String actor) throws IOException
     {
         JsonArray arr = new JsonArray();
         for (TileSpec t : tiles)
@@ -345,15 +361,16 @@ public class ApiClient
         }
         JsonObject body = new JsonObject();
         body.add("tiles", arr);
+        addActor(body, actor);
 
-        try (Response resp = post("/v1/games/" + gameId + "/mark-tiles", body, writeKey))
+        try (Response resp = post("/v1/games/" + gameId + "/mark-tiles", body, token))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Mark tiles failed (" + resp.code() + "): " + raw);
         }
     }
 
-    public void unmarkTiles(String gameId, String writeKey, List<PointSpec> points) throws IOException
+    public void unmarkTiles(String gameId, String token, List<PointSpec> points, String actor) throws IOException
     {
         JsonArray arr = new JsonArray();
         for (PointSpec p : points)
@@ -367,8 +384,9 @@ public class ApiClient
         }
         JsonObject body = new JsonObject();
         body.add("tiles", arr);
+        addActor(body, actor);
 
-        try (Response resp = post("/v1/games/" + gameId + "/unmark-tiles", body, writeKey))
+        try (Response resp = post("/v1/games/" + gameId + "/unmark-tiles", body, token))
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Unmark tiles failed (" + resp.code() + "): " + raw);
@@ -545,6 +563,14 @@ public class ApiClient
             builder.header("Authorization", "Bearer " + writeKey);
         }
         return http.newCall(builder.build()).execute();
+    }
+
+    /** Sets "actor" on a host-level action's body when authenticating as a referee rather than
+     * the write key -- see the server's require_host_or_referee. Left unset (not even present as
+     * null) for the write-key path, matching the server's Optional[str] = None default. */
+    private static void addActor(JsonObject body, String actor)
+    {
+        if (actor != null && !actor.isEmpty()) body.addProperty("actor", actor);
     }
 
     private static String bodyString(Response resp) throws IOException

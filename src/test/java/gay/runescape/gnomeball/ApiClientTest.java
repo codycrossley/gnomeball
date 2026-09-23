@@ -183,4 +183,49 @@ public class ApiClientTest
             assertEquals("Request failed (500)", e.getMessage());
         }
     }
+
+    /** Referee/host parity (see GnomeballPlugin#canActAsHost): a host-level action like
+     * updateScore now takes an actor, sent only when authenticating as a referee's own token
+     * rather than the write key -- the "actor" field must actually reach the request body when
+     * given, and must be entirely absent (not present as null) when it isn't, matching the
+     * server's Optional[str] = None default. */
+    @Test
+    public void updateScoreIncludesActorWhenAuthenticatingAsAReferee() throws Exception
+    {
+        server.enqueue(new MockResponse().setResponseCode(200).setBody("{\"ok\":true}"));
+
+        apiClient.updateScore("game1", "reftoken123", "TEAM_A", 3, "RefRsn");
+
+        RecordedRequest req = server.takeRequest(5, TimeUnit.SECONDS);
+        assertEquals("Bearer reftoken123", req.getHeader("Authorization"));
+        JsonObject body = bodyOf(req);
+        assertEquals("TEAM_A", body.get("team").getAsString());
+        assertEquals(3, body.get("score").getAsInt());
+        assertEquals("RefRsn", body.get("actor").getAsString());
+    }
+
+    @Test
+    public void updateScoreOmitsActorEntirelyOnTheWriteKeyPath() throws Exception
+    {
+        server.enqueue(new MockResponse().setResponseCode(200).setBody("{\"ok\":true}"));
+
+        apiClient.updateScore("game1", "the-write-key", "TEAM_A", 3, null);
+
+        RecordedRequest req = server.takeRequest(5, TimeUnit.SECONDS);
+        assertEquals("Bearer the-write-key", req.getHeader("Authorization"));
+        assertFalse("actor must not be present at all when null", bodyOf(req).has("actor"));
+    }
+
+    @Test
+    public void markTileIncludesActorWhenAuthenticatingAsAReferee() throws Exception
+    {
+        server.enqueue(new MockResponse().setResponseCode(200).setBody("{\"ok\":true}"));
+
+        apiClient.markTile("game1", "reftoken123", 10, 20, 0, "FIELD", null, "RefRsn");
+
+        RecordedRequest req = server.takeRequest(5, TimeUnit.SECONDS);
+        JsonObject body = bodyOf(req);
+        assertEquals("FIELD", body.get("tileType").getAsString());
+        assertEquals("RefRsn", body.get("actor").getAsString());
+    }
 }

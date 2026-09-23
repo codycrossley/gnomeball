@@ -2,6 +2,7 @@ package gay.runescape.gnomeball;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.Objects;
 
 /** Queues "team just scored" notifications so two that land close together (e.g. a
  * reconciliation poll catching up after both teams scored in quick succession) each get their
@@ -34,6 +35,11 @@ public class GoalFlashQueue
         {
             return until;
         }
+
+        private boolean matches(String team, int oldScore, int newScore)
+        {
+            return Objects.equals(this.team, team) && this.oldScore == oldScore && this.newScore == newScore;
+        }
     }
 
     private final long durationMs;
@@ -51,9 +57,21 @@ public class GoalFlashQueue
     }
 
     /** Arms a new flash, queuing it behind whatever's currently showing (if that hasn't expired
-     * yet as of {@code nowMs}) rather than replacing it outright. Safe to call from any thread. */
+     * yet as of {@code nowMs}) rather than replacing it outright. Safe to call from any thread.
+     *
+     * A flash identical to the one showing or already queued (same team, same old/new score) is
+     * dropped: that's the same goal reported twice -- the scorer's own optimistic preview
+     * (GnomeballPlugin#onZoneScore) followed by the server's GOAL_SCORED echo, which carry the
+     * exact same scores since the preview never bumps the local score. Two genuinely separate
+     * goals can't collide here, since each real goal advances the score. */
     public synchronized void enqueue(String team, int oldScore, int newScore, long nowMs)
     {
+        if (current != null && nowMs < current.until && current.matches(team, oldScore, newScore)) return;
+        for (Flash queued : pending)
+        {
+            if (queued.matches(team, oldScore, newScore)) return;
+        }
+
         Flash flash = new Flash(team, oldScore, newScore);
         if (current == null || nowMs >= current.until)
         {

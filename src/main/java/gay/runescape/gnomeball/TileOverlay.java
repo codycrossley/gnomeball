@@ -9,7 +9,6 @@ import net.runelite.client.ui.overlay.*;
 
 import java.awt.*;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -312,45 +311,42 @@ public class TileOverlay extends Overlay
         }
     }
 
+    /** Tile points are instance coordinates straight from Tile/Player#getWorldLocation (unique per
+     * tile, even inside a POH) -- deliberately NOT template coordinates, so this converts with
+     * LocalPoint.fromWorld directly rather than WorldPoint.toLocalInstance, which expects a
+     * template point and would find nothing for an instance one (and would light every copy of
+     * a repeated POH room chunk for a template one). Outside instances the two are identical. */
     private void renderFilledTile(Graphics2D g, WorldPoint wp, Color fill, Color border, Stroke stroke)
     {
-        Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), wp);
-        for (WorldPoint local : localPoints)
-        {
-            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
-            if (lp == null) continue;
+        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), wp);
+        if (lp == null) return;
 
-            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
-            if (poly == null) continue;
+        Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+        if (poly == null) return;
 
-            g.setColor(fill);
-            g.fillPolygon(poly);
-            g.setColor(border);
-            g.setStroke(stroke);
-            g.drawPolygon(poly);
-        }
+        g.setColor(fill);
+        g.fillPolygon(poly);
+        g.setColor(border);
+        g.setStroke(stroke);
+        g.drawPolygon(poly);
     }
 
     private void drawEdgeAt(Graphics2D g, int x, int y, int plane, String direction, Color color, Stroke stroke)
     {
-        WorldPoint wp = new WorldPoint(x, y, plane);
-        Collection<WorldPoint> localPoints = WorldPoint.toLocalInstance(client.getTopLevelWorldView(), wp);
-        for (WorldPoint local : localPoints)
-        {
-            LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), local);
-            if (lp == null) continue;
+        // Instance coordinates, converted directly -- see renderFilledTile.
+        LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), new WorldPoint(x, y, plane));
+        if (lp == null) return;
 
-            Polygon poly = Perspective.getCanvasTilePoly(client, lp);
-            if (poly == null || poly.npoints < 4) continue;
+        Polygon poly = Perspective.getCanvasTilePoly(client, lp);
+        if (poly == null || poly.npoints < 4) return;
 
-            int idx = edgeIndex(direction);
-            if (idx < 0) continue;
+        int idx = edgeIndex(direction);
+        if (idx < 0) return;
 
-            int i1 = idx, i2 = (idx + 1) % 4;
-            g.setColor(color);
-            g.setStroke(stroke);
-            g.drawLine(poly.xpoints[i1], poly.ypoints[i1], poly.xpoints[i2], poly.ypoints[i2]);
-        }
+        int i1 = idx, i2 = (idx + 1) % 4;
+        g.setColor(color);
+        g.setStroke(stroke);
+        g.drawLine(poly.xpoints[i1], poly.ypoints[i1], poly.xpoints[i2], poly.ypoints[i2]);
     }
 
     private static int edgeIndex(String direction)

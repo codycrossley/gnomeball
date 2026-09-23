@@ -600,7 +600,9 @@ public class GnomeballPanel extends PluginPanel
     public void refresh()
     {
         GamePhase phase   = plugin.getPhase();
-        boolean   isHost  = plugin.isHost();
+        // A referee the host has appointed gets the full "Host Controls" card too now, not just
+        // the separate "Referee Controls" one below -- see GnomeballPlugin#canActAsHost.
+        boolean   canActAsHost = plugin.canActAsHost();
         String    jc      = plugin.getJoinCode();
 
         switch (phase)
@@ -613,9 +615,9 @@ public class GnomeballPanel extends PluginPanel
                 cardLayout.show(cardPanel, "IN_GAME");
                 joinCodeValueLabel.setText(jc != null ? jc : "—");
                 refreshScoreboard();
-                hostControlsCard.setVisible(isHost);
+                hostControlsCard.setVisible(canActAsHost);
                 refreshGridButton();
-                hostPreStartPanel.setVisible(isHost);
+                hostPreStartPanel.setVisible(canActAsHost);
                 hostInGamePanel.setVisible(false);
                 refereePanel.setVisible(plugin.isReferee());
                 refereeActiveControlsPanel.setVisible(false);
@@ -627,10 +629,10 @@ public class GnomeballPanel extends PluginPanel
                 cardLayout.show(cardPanel, "IN_GAME");
                 joinCodeValueLabel.setText(jc != null ? jc : "—");
                 refreshScoreboard();
-                hostControlsCard.setVisible(isHost);
+                hostControlsCard.setVisible(canActAsHost);
                 refreshGridButton();
                 hostPreStartPanel.setVisible(false);
-                hostInGamePanel.setVisible(isHost);
+                hostInGamePanel.setVisible(canActAsHost);
                 refereePanel.setVisible(plugin.isReferee());
                 refereeActiveControlsPanel.setVisible(true);
                 timerToggleBtn.setText(plugin.isTimerPaused() ? "START Clock" : "STOP Clock");
@@ -698,15 +700,14 @@ public class GnomeballPanel extends PluginPanel
             row.add(numLabel);
             row.add(nameLabel);
 
-            // Host gets the full role/ball management menu (those actions run on the host's write
-            // key). A referee who isn't the host still gets the menu too, but only for the kick
-            // entry inside it -- see buildRolePopup -- since kicking authenticates as the referee's
-            // own session token rather than the write key. And a plain enlisted player who is
-            // neither gets it too, but only for their own row's Change Number entry.
+            // Any referee the host has appointed gets the full role/ball management menu now too
+            // (see canActAsHost() / buildRolePopup). A plain enlisted player who is neither the
+            // host nor a referee still gets the popup for their own row, but only for its Change
+            // Number entry.
             String myRsn = plugin.getLocalRsn();
             boolean isOwnEnlistedRow = myRsn != null && myRsn.equalsIgnoreCase(entry.rsn)
                 && (entry.role == GnomeballRole.TEAM_A || entry.role == GnomeballRole.TEAM_B);
-            if (plugin.isHost() || plugin.isReferee() || isOwnEnlistedRow)
+            if (plugin.canActAsHost() || isOwnEnlistedRow)
             {
                 JPopupMenu popup = buildRolePopup(entry.rsn, entry.role, entry.number);
                 attachPopup(row, popup);
@@ -742,10 +743,10 @@ public class GnomeballPanel extends PluginPanel
             popup.add(changeNumber);
         }
 
-        // Ball/role management runs on the host's write key, so only actually offer it to the
-        // host -- a non-host referee opening this same popup (see refreshRoster) only gets the
-        // Kick Player entry below, added regardless of host status.
-        if (plugin.isHost())
+        // Ball/role management now has full host/referee parity -- any referee the host has
+        // appointed can use this too, not just the write-key-holding host (see
+        // GnomeballPlugin#canActAsHost / the server's require_host_or_referee).
+        if (plugin.canActAsHost())
         {
             if (popup.getComponentCount() > 0) popup.addSeparator();
             if (plugin.getPhase() == GamePhase.ACTIVE)
@@ -963,7 +964,7 @@ public class GnomeballPanel extends PluginPanel
 
     private void refreshScoreboard()
     {
-        boolean isHost = plugin.isHost();
+        boolean canActAsHost = plugin.canActAsHost();
         boolean isReferee = plugin.isReferee();
         Color teamAColor = plugin.getTeamAColor();
         Color teamBColor = plugin.getTeamBColor();
@@ -973,8 +974,8 @@ public class GnomeballPanel extends PluginPanel
         if (!teamBNameField.isFocusOwner())
             teamBNameField.setText(plugin.getTeamBName());
 
-        teamANameField.setEditable(isHost);
-        teamBNameField.setEditable(isHost);
+        teamANameField.setEditable(canActAsHost);
+        teamBNameField.setEditable(canActAsHost);
         teamANameField.setForeground(teamAColor);
         teamBNameField.setForeground(teamBColor);
 
@@ -996,7 +997,7 @@ public class GnomeballPanel extends PluginPanel
         teamBColorSwatch.setCursor(Cursor.getPredefinedCursor(isReferee ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
 
         GamePhase phase = plugin.getPhase();
-        boolean showScoreBtns = isHost && phase == GamePhase.ACTIVE;
+        boolean showScoreBtns = canActAsHost && phase == GamePhase.ACTIVE;
         hostScoreAPanel.setVisible(showScoreBtns);
         hostScoreBPanel.setVisible(showScoreBtns);
     }

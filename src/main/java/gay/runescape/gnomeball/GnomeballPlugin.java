@@ -358,7 +358,7 @@ public class GnomeballPlugin extends Plugin
             addFlagTileMenuEntry();
         }
 
-        if (!isHost()) return;
+        if (!canActAsHost()) return;
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return;
 
         if ("Walk here".equals(event.getOption()))
@@ -937,7 +937,7 @@ public class GnomeballPlugin extends Plugin
         FieldPreset preset = selectedPreset;
         int rotationSteps = presetRotationSteps;
         cancelPresetMode();
-        if (!isHost() || gameId == null || preset == null) return;
+        if (!canActAsHost() || gameId == null || preset == null) return;
 
         List<FieldPreset.PlacedTile> placedTiles = preset.layout(center, rotationSteps);
         List<ApiClient.TileSpec> tileSpecs = new ArrayList<>(placedTiles.size());
@@ -945,10 +945,12 @@ public class GnomeballPlugin extends Plugin
         {
             tileSpecs.add(new ApiClient.TileSpec(pt.point.getX(), pt.point.getY(), pt.point.getPlane(), pt.tileType, pt.color, pt.orientation));
         }
+        final String token = hostLevelToken();
+        final String actor = hostLevelActor();
 
         executor.submit(() ->
         {
-            try { apiClient.markTiles(gameId, writeKey, tileSpecs); }
+            try { apiClient.markTiles(gameId, token, tileSpecs, actor); }
             catch (Exception ignored) { }
         });
     }
@@ -958,7 +960,7 @@ public class GnomeballPlugin extends Plugin
         FieldPreset preset = selectedPreset;
         int rotationSteps = presetRotationSteps;
         cancelPresetMode();
-        if (!isHost() || gameId == null || preset == null) return;
+        if (!canActAsHost() || gameId == null || preset == null) return;
 
         // Clear every type at each covered position (not just the preset's own declared type) —
         // e.g. removing a FIELD-only Custom Grid should also strip any ZONE_A/ZONE_B a host
@@ -968,10 +970,12 @@ public class GnomeballPlugin extends Plugin
         Set<WorldPoint> uniquePoints = new HashSet<>();
         for (FieldPreset.PlacedTile pt : preset.layout(center, rotationSteps)) uniquePoints.add(pt.point);
         List<ApiClient.PointSpec> pointSpecs = toPointSpecs(uniquePoints);
+        final String token = hostLevelToken();
+        final String actor = hostLevelActor();
 
         executor.submit(() ->
         {
-            try { apiClient.unmarkTiles(gameId, writeKey, pointSpecs); }
+            try { apiClient.unmarkTiles(gameId, token, pointSpecs, actor); }
             catch (Exception ignored) { }
         });
     }
@@ -1146,7 +1150,7 @@ public class GnomeballPlugin extends Plugin
      * field/zone tiles sharing any of those positions are left alone. */
     public void onRemoveFlagsClicked()
     {
-        if (!isHost() || gameId == null) return;
+        if (!canActAsHost() || gameId == null) return;
         List<WorldPoint> flags = tileReducer.flagPoints();
         if (flags.isEmpty()) return;
 
@@ -1157,10 +1161,11 @@ public class GnomeballPlugin extends Plugin
         }
 
         final String gid = gameId;
-        final String key = writeKey;
+        final String token = hostLevelToken();
+        final String actor = hostLevelActor();
         executor.submit(() ->
         {
-            try { apiClient.unmarkTiles(gid, key, pointSpecs); }
+            try { apiClient.unmarkTiles(gid, token, pointSpecs, actor); }
             catch (Exception ignored) { }
         });
         addChatMessage("Removing " + flags.size() + (flags.size() == 1 ? " flag." : " flags."));
@@ -1182,20 +1187,24 @@ public class GnomeballPlugin extends Plugin
 
     private void onMarkTile(WorldPoint wp, String tileType)
     {
-        if (!isHost() || gameId == null) return;
+        if (!canActAsHost() || gameId == null) return;
+        final String token = hostLevelToken();
+        final String actor = hostLevelActor();
         executor.submit(() ->
         {
-            try { apiClient.markTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), tileType, null); }
+            try { apiClient.markTile(gameId, token, wp.getX(), wp.getY(), wp.getPlane(), tileType, null, actor); }
             catch (Exception ignored) { }
         });
     }
 
     private void onUnmarkTile(WorldPoint wp, String tileType)
     {
-        if (!isHost() || gameId == null) return;
+        if (!canActAsHost() || gameId == null) return;
+        final String token = hostLevelToken();
+        final String actor = hostLevelActor();
         executor.submit(() ->
         {
-            try { apiClient.unmarkTile(gameId, writeKey, wp.getX(), wp.getY(), wp.getPlane(), tileType); }
+            try { apiClient.unmarkTile(gameId, token, wp.getX(), wp.getY(), wp.getPlane(), tileType, actor); }
             catch (Exception ignored) { }
         });
     }
@@ -1656,20 +1665,24 @@ public class GnomeballPlugin extends Plugin
 
     public void onStartClicked(int durationSeconds)
     {
-        if (!isHost() || gameId == null) return;
+        if (!canActAsHost() || gameId == null) return;
+        final String token = hostLevelToken();
+        final String actor = hostLevelActor();
         executor.submit(() ->
         {
-            try { apiClient.startGame(gameId, writeKey, durationSeconds); }
+            try { apiClient.startGame(gameId, token, durationSeconds, actor); }
             catch (Exception ignored) { }
         });
     }
 
     public void onEndClicked()
     {
-        if (!isHost() || gameId == null) return;
+        if (!canActAsHost() || gameId == null) return;
+        final String token = hostLevelToken();
+        final String actor = hostLevelActor();
         executor.submit(() ->
         {
-            try { apiClient.endGame(gameId, writeKey); }
+            try { apiClient.endGame(gameId, token, actor); }
             catch (Exception ignored) { }
         });
     }
@@ -1696,10 +1709,12 @@ public class GnomeballPlugin extends Plugin
 
     public void onRenameTeam(String team, String name)
     {
-        if (!isHost() || gameId == null) return;
+        if (!canActAsHost() || gameId == null) return;
+        final String token = hostLevelToken();
+        final String actor = hostLevelActor();
         executor.submit(() ->
         {
-            try { apiClient.renameTeam(gameId, writeKey, team, name); }
+            try { apiClient.renameTeam(gameId, token, team, name, actor); }
             catch (Exception ignored) { }
         });
     }
@@ -1746,10 +1761,12 @@ public class GnomeballPlugin extends Plugin
 
     public void onUpdateScore(String team, int score)
     {
-        if (!isHost() || gameId == null) return;
+        if (!canActAsHost() || gameId == null) return;
+        final String token = hostLevelToken();
+        final String actor = hostLevelActor();
         executor.submit(() ->
         {
-            try { apiClient.updateScore(gameId, writeKey, team, score); }
+            try { apiClient.updateScore(gameId, token, team, score, actor); }
             catch (Exception ignored) { }
         });
     }
@@ -1784,10 +1801,12 @@ public class GnomeballPlugin extends Plugin
 
     public void onClearBallClicked()
     {
-        if (!isHost() || gameId == null) return;
+        if (!canActAsHost() || gameId == null) return;
+        final String token = hostLevelToken();
+        final String actor = hostLevelActor();
         executor.submit(() ->
         {
-            try { apiClient.clearBall(gameId, writeKey); }
+            try { apiClient.clearBall(gameId, token, actor); }
             catch (Exception ignored) { }
         });
     }
@@ -1798,7 +1817,7 @@ public class GnomeballPlugin extends Plugin
      * one call per tile instead of one per (tile, type). */
     public void onClearArenaClicked()
     {
-        if (!isHost() || gameId == null) return;
+        if (!canActAsHost() || gameId == null) return;
         List<TileReducer.TileEntry> snapshot = tileReducer.fieldSnapshot();
         if (snapshot.isEmpty())
         {
@@ -1809,10 +1828,12 @@ public class GnomeballPlugin extends Plugin
         Set<WorldPoint> uniquePoints = new HashSet<>();
         for (TileReducer.TileEntry e : snapshot) uniquePoints.add(e.point);
         List<ApiClient.PointSpec> pointSpecs = toPointSpecs(uniquePoints);
+        final String token = hostLevelToken();
+        final String actor = hostLevelActor();
 
         executor.submit(() ->
         {
-            try { apiClient.unmarkTiles(gameId, writeKey, pointSpecs); }
+            try { apiClient.unmarkTiles(gameId, token, pointSpecs, actor); }
             catch (Exception ignored) { }
         });
         addChatMessage("Clearing current arena.");
@@ -1848,20 +1869,24 @@ public class GnomeballPlugin extends Plugin
 
     public void onAssignBallClicked(String playerRsn)
     {
-        if (!isHost() || gameId == null) return;
+        if (!canActAsHost() || gameId == null) return;
+        final String token = hostLevelToken();
+        final String actor = hostLevelActor();
         executor.submit(() ->
         {
-            try { apiClient.assignBall(gameId, writeKey, playerRsn); }
+            try { apiClient.assignBall(gameId, token, playerRsn, actor); }
             catch (Exception ignored) { }
         });
     }
 
     public void onAssignRoleClicked(String playerRsn, GnomeballRole role)
     {
-        if (!isHost() || gameId == null) return;
+        if (!canActAsHost() || gameId == null) return;
+        final String token = hostLevelToken();
+        final String actor = hostLevelActor();
         executor.submit(() ->
         {
-            try { apiClient.assignRole(gameId, writeKey, playerRsn, role); }
+            try { apiClient.assignRole(gameId, token, playerRsn, role, actor); }
             catch (Exception ignored) { }
         });
     }
@@ -2055,6 +2080,29 @@ public class GnomeballPlugin extends Plugin
         String rsn = localRsn();
         if (rsn == null) return false;
         return rosterReducer.getRole(rsn) == GnomeballRole.REFEREE;
+    }
+
+    /** True for any host-level action -- one the host's write key used to gate exclusively, now
+     * also open to any enlisted referee (see the server's require_host_or_referee) so the host
+     * can appoint someone else to stand in for them completely. */
+    public boolean canActAsHost()
+    {
+        return isHost() || isReferee();
+    }
+
+    /** The bearer credential for a host-level action -- the write key if we hold one (we're the
+     * host), otherwise our own player token (a referee, per canActAsHost() already having been
+     * checked by the caller). Pair with {@link #hostLevelActor()}. */
+    private String hostLevelToken()
+    {
+        return isHost() ? writeKey : playerToken;
+    }
+
+    /** The "actor" to send alongside {@link #hostLevelToken()} -- null on the write-key path (the
+     * server needs no per-request identity for that one), otherwise our own rsn. */
+    private String hostLevelActor()
+    {
+        return isHost() ? null : localRsn();
     }
 
     public void onBlowWhistleClicked()
