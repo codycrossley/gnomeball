@@ -412,6 +412,15 @@ public class TimerOverlay extends Overlay
 
     private static final Font hostMessageFont = FontManager.getRunescapeBoldFont().deriveFont(20f);
 
+    // wrapText re-splits the message and re-measures every word against the font -- cheap once,
+    // but renderHostMessageFlash used to call it on every single render() frame for the whole
+    // 5s flash window (hundreds of calls for one static string), which is what showed up as
+    // rendering lag while an announcement was on screen. Cache the wrapped lines and only
+    // recompute when the message or the wrap width actually changes.
+    private String cachedWrapMessage;
+    private int cachedWrapWidth;
+    private List<String> cachedWrapLines;
+
     private void renderHostMessageFlash(Graphics2D g)
     {
         long flashUntil = plugin.getHostMessageFlashUntil();
@@ -443,7 +452,14 @@ public class TimerOverlay extends Overlay
 
         g.setFont(hostMessageFont);
         FontMetrics msgFm = g.getFontMetrics();
-        List<String> lines = wrapText(message, msgFm, (int) (canvasW * 0.8));
+        int wrapWidth = (int) (canvasW * 0.8);
+        if (cachedWrapLines == null || !message.equals(cachedWrapMessage) || wrapWidth != cachedWrapWidth)
+        {
+            cachedWrapLines = wrapText(message, msgFm, wrapWidth);
+            cachedWrapMessage = message;
+            cachedWrapWidth = wrapWidth;
+        }
+        List<String> lines = cachedWrapLines;
 
         int lineY = headerY + headerFm.getHeight() + 8;
         for (String line : lines)

@@ -8,6 +8,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.ui.overlay.*;
 
 import java.awt.*;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -79,26 +80,57 @@ public class TileOverlay extends Overlay
         return null;
     }
 
-    private void renderCommittedTiles(Graphics2D g)
+    // Everything renderCommittedTiles derives from the committed tile set (fillable entries,
+    // per-type grouping, connectivity) depends only on that set, which changes on a TILE_MARKED/
+    // TILE_UNMARKED event -- far rarer than once a render frame. Rebuilding it from scratch every
+    // frame (as this used to) meant hashing/allocating over the whole field (hundreds of tiles for
+    // something like the regulation RFL preset) on every single frame for the entire game, not just
+    // while something was actively changing -- the same wasted-recompute pattern TimerOverlay's
+    // host-message wrap had, just continuous instead of bounded to a 5s flash. Cached here, keyed
+    // on TileReducer's version counter, and only rebuilt when tiles actually change.
+    private int cachedTileVersion = -1;
+    private List<TileReducer.TileEntry> cachedFillEntries = List.of();
+    private Map<String, Set<WorldPoint>> cachedByType = Map.of();
+    private Map<String, Set<WorldPoint>> cachedConnectivity = Map.of();
+
+    private void refreshTileCache()
     {
+        int v = tileReducer.version();
+        if (v == cachedTileVersion) return;
+
         List<TileReducer.TileEntry> entries = tileReducer.snapshot();
+
+        List<TileReducer.TileEntry> fill = new ArrayList<>();
+        Map<String, Set<WorldPoint>> byType = new HashMap<>();
+        for (String type : OUTLINE_TYPES) byType.put(type, new HashSet<>());
 
         for (TileReducer.TileEntry entry : entries)
         {
             // Rendered as a real 3D NPC model by CheerleaderRenderer instead -- would otherwise
             // double up as both a flat colored tile here and a model standing on top of it.
-            if ("CHEERLEADER_A".equals(entry.tileType) || "CHEERLEADER_B".equals(entry.tileType)) continue;
-            if (OUTLINE_TYPES.contains(entry.tileType)) continue;
-            Color base = resolveColor(entry.color, entry.tileType);
-            renderFilledTile(g, entry.point, withAlpha(base, 60), withAlpha(base, 200), SOLID_STROKE);
+            boolean isCheerleader = "CHEERLEADER_A".equals(entry.tileType) || "CHEERLEADER_B".equals(entry.tileType);
+            Set<WorldPoint> outlineSet = byType.get(entry.tileType);
+            if (outlineSet != null) outlineSet.add(entry.point);
+            else if (!isCheerleader) fill.add(entry);
         }
 
-        Map<String, Set<WorldPoint>> byType = new HashMap<>();
-        for (String type : OUTLINE_TYPES) byType.put(type, new HashSet<>());
-        for (TileReducer.TileEntry entry : entries)
+        Map<String, Set<WorldPoint>> connectivity = new HashMap<>();
+        for (String type : OUTLINE_TYPES) connectivity.put(type, connectivityFor(type, byType));
+
+        cachedFillEntries = fill;
+        cachedByType = byType;
+        cachedConnectivity = connectivity;
+        cachedTileVersion = v;
+    }
+
+    private void renderCommittedTiles(Graphics2D g)
+    {
+        refreshTileCache();
+
+        for (TileReducer.TileEntry entry : cachedFillEntries)
         {
-            Set<WorldPoint> set = byType.get(entry.tileType);
-            if (set != null) set.add(entry.point);
+            Color base = resolveColor(entry.color, entry.tileType);
+            renderFilledTile(g, entry.point, withAlpha(base, 60), withAlpha(base, 200), SOLID_STROKE);
         }
 
         Color oobFlash = resolveOutOfBoundsFlashColor();
@@ -108,7 +140,7 @@ public class TileOverlay extends Overlay
 
         for (String type : OUTLINE_TYPES)
         {
-            Set<WorldPoint> tiles = byType.get(type);
+            Set<WorldPoint> tiles = cachedByType.get(type);
             if (tiles.isEmpty()) continue;
 
             Color edgeColor;
@@ -137,7 +169,7 @@ public class TileOverlay extends Overlay
                 edgeColor = withAlpha(defaultColorFor(type), 220);
                 stroke = SOLID_STROKE;
             }
-            renderOutline(g, tiles, connectivityFor(type, byType), edgeColor, stroke);
+            renderOutline(g, tiles, cachedConnectivity.get(type), edgeColor, stroke);
         }
     }
 

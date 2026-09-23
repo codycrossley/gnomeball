@@ -28,6 +28,16 @@ public class TileReducer
 
     private final ConcurrentHashMap<String, TileEntry> tiles = new ConcurrentHashMap<>();
 
+    // Bumped on every mutation below -- lets a per-frame renderer (TileOverlay) cache whatever it
+    // derives from the committed tile set (grouping/connectivity) and only recompute when this
+    // actually changes, instead of rebuilding it from scratch on every single render() call.
+    private volatile int version = 0;
+
+    public int version()
+    {
+        return version;
+    }
+
     public void apply(ApiClient.EventOut e)
     {
         if (e == null || e.type == null) return;
@@ -74,6 +84,7 @@ public class TileReducer
 
         tiles.put(key(x, y, plane, tileType),
             new TileEntry(new WorldPoint(x, y, plane), tileType, color, orientation));
+        version++;
     }
 
     private void applyUnmark(JsonObject tile)
@@ -93,6 +104,7 @@ public class TileReducer
             String prefix = x + ":" + y + ":" + plane + ":";
             tiles.keySet().removeIf(k -> k.startsWith(prefix));
         }
+        version++;
     }
 
     private static JsonArray asArray(JsonObject o, String k)
@@ -110,11 +122,13 @@ public class TileReducer
             tiles.put(key(t.x, t.y, t.plane, t.tileType),
                 new TileEntry(new WorldPoint(t.x, t.y, t.plane), t.tileType, t.color, t.orientation));
         }
+        version++;
     }
 
     public void reset()
     {
         tiles.clear();
+        version++;
     }
 
     public List<TileEntry> snapshot()
