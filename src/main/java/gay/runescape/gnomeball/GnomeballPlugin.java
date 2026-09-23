@@ -3,6 +3,7 @@ package gay.runescape.gnomeball;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import com.google.inject.Provides;
+import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
@@ -81,8 +82,8 @@ public class GnomeballPlugin extends Plugin
     private static final int    HANDEGG_THROW_ANIMATION_ID = 7995;
     private static final long   THROW_CONFIRM_WINDOW_MS = 2000; // Time waited to check if throwing animation is triggered
     private static final String COLOR_REFEREE = "3CB34A";
-    private static final String COLOR_TEAM_A  = "3C78DC";
-    private static final String COLOR_TEAM_B  = "C83C3C";
+    private static final String DEFAULT_COLOR_TEAM_A = "3C78DC";
+    private static final String DEFAULT_COLOR_TEAM_B = "C83C3C";
 
     // Tag effect — STUNNED spotanim, played directly on the tagged player
     private static final int    TAG_SPOTANIM_ID = 80;
@@ -173,6 +174,11 @@ public class GnomeballPlugin extends Plugin
     private volatile String winner   = null;
     private volatile String teamAName = "Team A";
     private volatile String teamBName = "Team B";
+    // 6 hex digits, no leading '#' -- referee-settable via GnomeballPanel's color swatches (see
+    // onSetTeamColorClicked). Every renderer that used to hard-code its own team-A/B color reads
+    // these (or getTeamAColor()/getTeamBColor(), the java.awt.Color-typed form) instead now.
+    private volatile String teamAColorHex = DEFAULT_COLOR_TEAM_A;
+    private volatile String teamBColorHex = DEFAULT_COLOR_TEAM_B;
     private volatile int teamAScore = 0;
     private volatile int teamBScore = 0;
     private volatile boolean presetPlacementMode = false;
@@ -199,11 +205,10 @@ public class GnomeballPlugin extends Plugin
     private volatile long confettiUntil = 0;
     private volatile long   fieldEndFlashUntil = 0;
     private volatile String fieldEndFlashTeam  = null; // "TEAM_A"/"TEAM_B", or null for a tie (no flash)
-    // Edge-trigger latch for the clock-reaches-zero celebration: only true once the countdown has
-    // actually crossed from >0 into <=0, so the celebration fires exactly once per expiry rather
-    // than on every tick spent sitting at zero. Deliberately left untouched while paused (see
-    // checkClockExpiry) so a referee pausing right at the buzzer and resuming afterward doesn't
-    // cause a spurious replay.
+    // Whether the running countdown has reached zero -- drives the timer box's/FIELD outline's
+    // "clock stopped" look only. Reaching zero no longer ends anything by itself: the game-over
+    // celebration waits for the host's End Game (see GAME_ENDED). Deliberately left untouched
+    // while paused (see checkClockExpiry).
     private volatile boolean clockAtZero = false;
     // See GoalFlashQueue's own javadoc -- callers include the WebSocket event thread, the
     // roster-poll executor thread, and the client thread (an optimistic local score) alike; the
@@ -226,7 +231,7 @@ public class GnomeballPlugin extends Plugin
         rosterReducer = new RosterReducer();
         tileReducer   = new TileReducer();
         cheerleaderRenderer = new CheerleaderRenderer(client, clientThread, this);
-        goalpostRenderer = new GoalpostRenderer(client, clientThread);
+        goalpostRenderer = new GoalpostRenderer(client, clientThread, this);
         flagRenderer = new FlagRenderer(client, clientThread);
         loadCustomFieldSlots();
         loadHostedGameKeys();
@@ -242,7 +247,7 @@ public class GnomeballPlugin extends Plugin
         clientToolbar.addNavigation(navButton);
 
         playerOverlay = new PlayerOverlay(client, config, this, rosterReducer, modelOutlineRenderer);
-        timerOverlay = new TimerOverlay(client, this);
+        timerOverlay = new TimerOverlay(client, config, this);
         tileOverlay = new TileOverlay(client, config, this, tileReducer);
         confettiOverlay = new ConfettiOverlay(client, this);
         cheerleaderSpeechOverlay = new CheerleaderSpeechOverlay(client, this, cheerleaderRenderer);
@@ -322,7 +327,7 @@ public class GnomeballPlugin extends Plugin
             stopPeriodicTasks();
             gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
             phase = GamePhase.DISCONNECTED; deadlineMs = 0; winner = null;
-            teamAName = "Team A"; teamBName = "Team B"; teamAScore = 0; teamBScore = 0;
+            teamAName = "Team A"; teamBName = "Team B"; teamAColorHex = DEFAULT_COLOR_TEAM_A; teamBColorHex = DEFAULT_COLOR_TEAM_B; teamAScore = 0; teamBScore = 0;
             timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0; ballHolder = null;
             tagObligationTagger = null;
             tagImmunePlayer = null; tagImmuneUntil = 0;
@@ -380,11 +385,11 @@ public class GnomeballPlugin extends Plugin
 
         Menu subMenu = enlistEntry.createSubMenu();
         subMenu.createMenuEntry(-1)
-            .setOption("<col=" + COLOR_TEAM_B + ">" + teamBName + "</col>")
+            .setOption("<col=" + teamBColorHex + ">" + teamBName + "</col>")
             .setTarget("").setType(MenuAction.RUNELITE_PLAYER).setIdentifier(event.getIdentifier())
             .onClick(me -> handleEnlistClick(me, GnomeballRole.TEAM_B));
         subMenu.createMenuEntry(-1)
-            .setOption("<col=" + COLOR_TEAM_A + ">" + teamAName + "</col>")
+            .setOption("<col=" + teamAColorHex + ">" + teamAName + "</col>")
             .setTarget("").setType(MenuAction.RUNELITE_PLAYER).setIdentifier(event.getIdentifier())
             .onClick(me -> handleEnlistClick(me, GnomeballRole.TEAM_A));
         subMenu.createMenuEntry(-1)
@@ -567,23 +572,17 @@ public class GnomeballPlugin extends Plugin
         });
     }
 
-    /** Edge-triggers the win celebration the moment the countdown crosses from >0 into <=0 — the
-     * real "end of the match" from a player's perspective, independent of whether/when the host
-     * later gets around to clicking End Game. Deliberately does nothing while paused or inactive,
-     * leaving {@link #clockAtZero} exactly as it was, so a referee pausing right at the buzzer and
-     * resuming afterward can't cause a second, spurious celebration. */
+    /** Tracks whether the countdown has hit zero. Nothing else happens at zero -- the clock just
+     * sits at 0:00 until the host presses End Game, which is what triggers the celebration (see
+     * GAME_ENDED). Does nothing while paused or inactive, leaving {@link #clockAtZero} as it was. */
     private void checkClockExpiry()
     {
         if (phase != GamePhase.ACTIVE || timerPaused || deadlineMs <= 0) return;
-
-        boolean nowAtZero = System.currentTimeMillis() >= deadlineMs;
-        if (nowAtZero && !clockAtZero)
-        {
-            triggerCelebration();
-        }
-        clockAtZero = nowAtZero;
+        clockAtZero = System.currentTimeMillis() >= deadlineMs;
     }
 
+    /** The "FINAL SCORE / CONGRATULATIONS" flash, confetti, and winning-team field flash -- fired
+     * only when the game actually ends (the host's End Game, see GAME_ENDED). */
     private void triggerCelebration()
     {
         gameEndFlashUntil = System.currentTimeMillis() + 8000;
@@ -1002,11 +1001,11 @@ public class GnomeballPlugin extends Plugin
         }
 
         subMenu.createMenuEntry(-1)
-            .setOption("<col=" + COLOR_TEAM_A + ">Zone A</col>")
+            .setOption("<col=" + teamAColorHex + ">Zone A</col>")
             .setTarget("").setType(MenuAction.RUNELITE)
             .onClick(me -> toggleTile(wp, "ZONE_A"));
         subMenu.createMenuEntry(-1)
-            .setOption("<col=" + COLOR_TEAM_B + ">Zone B</col>")
+            .setOption("<col=" + teamBColorHex + ">Zone B</col>")
             .setTarget("").setType(MenuAction.RUNELITE)
             .onClick(me -> toggleTile(wp, "ZONE_B"));
         subMenu.createMenuEntry(-1)
@@ -1014,11 +1013,11 @@ public class GnomeballPlugin extends Plugin
             .setTarget("").setType(MenuAction.RUNELITE)
             .onClick(me -> toggleTile(wp, "FIELD"));
         subMenu.createMenuEntry(-1)
-            .setOption("<col=" + COLOR_TEAM_A + ">Cheerleader</col>")
+            .setOption("<col=" + teamAColorHex + ">Cheerleader</col>")
             .setTarget("").setType(MenuAction.RUNELITE)
             .onClick(me -> toggleTile(wp, "CHEERLEADER_A"));
         subMenu.createMenuEntry(-1)
-            .setOption("<col=" + COLOR_TEAM_B + ">Cheerleader</col>")
+            .setOption("<col=" + teamBColorHex + ">Cheerleader</col>")
             .setTarget("").setType(MenuAction.RUNELITE)
             .onClick(me -> toggleTile(wp, "CHEERLEADER_B"));
     }
@@ -1254,6 +1253,7 @@ public class GnomeballPlugin extends Plugin
             {
                 phase = GamePhase.ENDED;
                 if (e.payload != null) winner = safeStr(e.payload, "winner");
+                triggerCelebration();
                 clearSession();
                 eventSocket.stop();
                 stopPeriodicTasks();
@@ -1265,6 +1265,14 @@ public class GnomeballPlugin extends Plugin
                 String name = safeStr(e.payload, "name");
                 if ("TEAM_A".equals(team) && name != null) teamAName = name;
                 else if ("TEAM_B".equals(team) && name != null) teamBName = name;
+                break;
+            }
+            case "TEAM_COLOR_CHANGED":
+            {
+                String team = safeStr(e.payload, "team");
+                String color = safeStr(e.payload, "color");
+                if ("TEAM_A".equals(team) && color != null) teamAColorHex = color;
+                else if ("TEAM_B".equals(team) && color != null) teamBColorHex = color;
                 break;
             }
             case "SCORE_UPDATED":
@@ -1447,6 +1455,10 @@ public class GnomeballPlugin extends Plugin
             case "PLAYER_JOINED":
             case "ROLE_ASSIGNED":
             case "PLAYER_LEFT":
+            case "NUMBER_CHANGED":
+                // NUMBER_CHANGED can shuffle more than just the requesting player's own number
+                // (see app.py's _finalize_roster gap-filling) -- a full refetch is the simplest
+                // way to pick up everyone's current number correctly.
                 requestRosterRefresh();
                 break;
         }
@@ -1473,13 +1485,13 @@ public class GnomeballPlugin extends Plugin
         addChatMessage("You've been tagged! You must pass the Gnomeball to " + label + ".");
     }
 
-    private static String roleColorHex(GnomeballRole role)
+    private String roleColorHex(GnomeballRole role)
     {
         if (role == null) return null;
         switch (role)
         {
-            case TEAM_A:   return COLOR_TEAM_A;
-            case TEAM_B:   return COLOR_TEAM_B;
+            case TEAM_A:   return teamAColorHex;
+            case TEAM_B:   return teamBColorHex;
             case REFEREE:  return COLOR_REFEREE;
             default:       return null;
         }
@@ -1538,6 +1550,8 @@ public class GnomeballPlugin extends Plugin
         rosterReducer.syncFromRoster(snap.players);
         if (snap.teamAName != null) teamAName = snap.teamAName;
         if (snap.teamBName != null) teamBName = snap.teamBName;
+        if (snap.teamAColor != null) teamAColorHex = snap.teamAColor;
+        if (snap.teamBColor != null) teamBColorHex = snap.teamBColor;
         // No goal flash here, deliberately -- this snapshot sync runs on join, on resume, and as
         // a roster-membership catch-up poll, none of which mean "a player just reached the zone."
         // A score increase seen here could just as easily be a host's manual correction (or, on
@@ -1690,6 +1704,46 @@ public class GnomeballPlugin extends Plugin
         });
     }
 
+    /** Referee-only (any referee, not just the host -- see ApiClient#setTeamColor). Optimistically
+     * applies the color locally first so the swatch that was just clicked updates instantly
+     * instead of waiting on the round trip, the same way onZoneScore's goal flash does. */
+    public void onSetTeamColorClicked(String team, Color color)
+    {
+        if (!isReferee() || gameId == null) return;
+        final String rsn = localRsn();
+        if (rsn == null) return;
+        String hex = String.format("%06X", color.getRGB() & 0xFFFFFF);
+
+        if ("TEAM_A".equals(team)) teamAColorHex = hex;
+        else if ("TEAM_B".equals(team)) teamBColorHex = hex;
+        else return;
+        SwingUtilities.invokeLater(() -> panel.refresh());
+
+        final String gid = gameId;
+        final String token = playerToken;
+        executor.submit(() ->
+        {
+            try { apiClient.setTeamColor(gid, rsn, team, hex, token); }
+            catch (Exception ignored) { }
+        });
+    }
+
+    /** Self-service -- any enlisted team player can pick their own number. Server-validated
+     * (range, role, uniqueness); a rejection is shown straight to the player via chat rather than
+     * just logged, per ApiClient#changeNumber's clean error-detail extraction. */
+    public void onChangeNumberClicked(int number)
+    {
+        final String gid = gameId;
+        final String rsn = localRsn();
+        if (gid == null || rsn == null) return;
+        final String token = playerToken;
+        executor.submit(() ->
+        {
+            try { apiClient.changeNumber(gid, rsn, number, token); }
+            catch (Exception e) { addChatMessage("Couldn't change number: " + e.getMessage()); }
+        });
+    }
+
     public void onUpdateScore(String team, int score)
     {
         if (!isHost() || gameId == null) return;
@@ -1827,8 +1881,27 @@ public class GnomeballPlugin extends Plugin
     public GnomeballConfig getConfig()   { return config; }
     public String        getTeamAName()  { return teamAName; }
     public String        getTeamBName()  { return teamBName; }
+    public String        getTeamAColorHex() { return teamAColorHex; }
+    public String        getTeamBColorHex() { return teamBColorHex; }
+    public Color         getTeamAColor() { return hexToColor(teamAColorHex, DEFAULT_COLOR_TEAM_A); }
+    public Color         getTeamBColor() { return hexToColor(teamBColorHex, DEFAULT_COLOR_TEAM_B); }
     public int           getTeamAScore() { return teamAScore; }
     public int           getTeamBScore() { return teamBScore; }
+
+    /** Parses a 6-hex-digit (no '#') team color into a java.awt.Color for renderers that want one
+     * directly, falling back to {@code fallbackHex} (always one of the DEFAULT_COLOR_TEAM_
+     * constants) if the stored value is ever somehow malformed. */
+    private static Color hexToColor(String hex, String fallbackHex)
+    {
+        try
+        {
+            return new Color(Integer.parseInt(hex, 16));
+        }
+        catch (Exception ignored)
+        {
+            return new Color(Integer.parseInt(fallbackHex, 16));
+        }
+    }
     public boolean       isPresetPlacementMode() { return presetPlacementMode; }
     public boolean       isPresetRemovalMode()   { return presetRemovalMode; }
     public FieldPreset   getSelectedPreset()     { return selectedPreset; }
@@ -2150,7 +2223,7 @@ public class GnomeballPlugin extends Plugin
         clearSession();
         gameId = null; writeKey = null; playerToken = null; joinCode = null; hostRsn = null;
         phase = GamePhase.DISCONNECTED; deadlineMs = 0; winner = null;
-        teamAName = "Team A"; teamBName = "Team B"; teamAScore = 0; teamBScore = 0;
+        teamAName = "Team A"; teamBName = "Team B"; teamAColorHex = DEFAULT_COLOR_TEAM_A; teamBColorHex = DEFAULT_COLOR_TEAM_B; teamAScore = 0; teamBScore = 0;
         timerPaused = false; pausedRemainingMs = 0; whistleFlashUntil = 0; ballHolder = null;
         pendingThrowTarget = null; pendingThrowDeadline = 0;
         tagObligationTagger = null;

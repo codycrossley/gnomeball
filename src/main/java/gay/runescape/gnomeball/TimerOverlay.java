@@ -12,8 +12,6 @@ public class TimerOverlay extends Overlay
     private static final Color COLOR_PLENTY   = new Color(255, 255, 255, 220);
     private static final Color COLOR_WARNING  = new Color(255, 200,  60, 220);
     private static final Color COLOR_DANGER   = new Color(255,  60,  60, 220);
-    private static final Color COLOR_TEAM_A   = new Color(17, 104, 253, 220);
-    private static final Color COLOR_TEAM_B   = new Color(200, 60, 60, 220);
     private static final Color COLOR_REFEREE  = new Color(60, 179, 74, 220);
     private static final Color COLOR_BALL     = new Color(255, 210, 0, 220);
     private static final Color BG_COLOR       = new Color(0, 0, 0, 140);
@@ -23,15 +21,17 @@ public class TimerOverlay extends Overlay
     private static final long  PULSE_PERIOD_MS = 1400;
 
     private final Client client;
+    private final GnomeballConfig config;
     private final GnomeballPlugin plugin;
 
     private final Font timerFont = FontManager.getRunescapeBoldFont().deriveFont(22f);
     private final Font scoreFont = FontManager.getRunescapeBoldFont().deriveFont(24f);
     private final Font goalFont  = FontManager.getRunescapeBoldFont().deriveFont(48f);
 
-    public TimerOverlay(Client client, GnomeballPlugin plugin)
+    public TimerOverlay(Client client, GnomeballConfig config, GnomeballPlugin plugin)
     {
         this.client = client;
+        this.config = config;
         this.plugin = plugin;
 
         setPosition(OverlayPosition.TOP_LEFT);
@@ -45,6 +45,24 @@ public class TimerOverlay extends Overlay
         GamePhase phase = plugin.getPhase();
         if (phase == GamePhase.DISCONNECTED) return null;
 
+        boolean showClock = config.showClock();
+        boolean showScoreboard = config.showScoreboard();
+
+        // The full-screen flashes (goal, whistle, announcements, ...) live on this overlay too, but
+        // they're game events rather than part of the HUD box, so they render regardless of either toggle.
+        Dimension box = (showClock || showScoreboard) ? renderBox(g, phase, showClock, showScoreboard) : null;
+
+        renderGoalFlash(g);
+        renderWhistleFlash(g);
+        renderInterceptionFlash(g);
+        renderHostMessageFlash(g);
+        renderGameEndFlash(g);
+
+        return box;
+    }
+
+    private Dimension renderBox(Graphics2D g, GamePhase phase, boolean showClock, boolean showScoreboard)
+    {
         final String text;
         final Color color;
 
@@ -97,8 +115,11 @@ public class TimerOverlay extends Overlay
 
         int ballIndicatorSpace = 16;
 
-        int boxW = Math.max(timerW, scoreLineW) + pad * 2;
-        int boxH = timerH + scoreH + pad * 3 + ballIndicatorSpace;
+        int clockBlockH = showClock ? timerH + pad : 0;
+        int scoreBlockH = showScoreboard ? scoreH + pad + ballIndicatorSpace : 0;
+
+        int boxW = Math.max(showClock ? timerW : 0, showScoreboard ? scoreLineW : 0) + pad * 2;
+        int boxH = pad + clockBlockH + scoreBlockH;
 
         g.setColor(BG_COLOR);
         g.fillRoundRect(0, 0, boxW, boxH, 6, 6);
@@ -117,29 +138,29 @@ public class TimerOverlay extends Overlay
             renderIdleOutline(g, boxW, boxH);
         }
 
-        g.setFont(timerFont);
-        int timerX = (boxW - timerW) / 2;
-        g.setColor(color);
-        g.drawString(text, timerX, pad + timerH - timerFm.getDescent());
+        if (showClock)
+        {
+            g.setFont(timerFont);
+            int timerX = (boxW - timerW) / 2;
+            g.setColor(color);
+            g.drawString(text, timerX, pad + timerH - timerFm.getDescent());
+        }
 
-        g.setFont(scoreFont);
-        int scoreY = pad + timerH + pad + scoreH - scoreFm.getDescent();
-        int scoreStartX = (boxW - scoreLineW) / 2;
+        if (showScoreboard)
+        {
+            g.setFont(scoreFont);
+            int scoreY = pad + clockBlockH + scoreH - scoreFm.getDescent();
+            int scoreStartX = (boxW - scoreLineW) / 2;
 
-        g.setColor(COLOR_TEAM_A);
-        g.drawString(scoreA, scoreStartX, scoreY);
-        g.setColor(COLOR_PLENTY);
-        g.drawString(dash, scoreStartX + scoreAW, scoreY);
-        g.setColor(COLOR_TEAM_B);
-        g.drawString(scoreB, scoreStartX + scoreAW + dashW, scoreY);
+            g.setColor(plugin.getTeamAColor());
+            g.drawString(scoreA, scoreStartX, scoreY);
+            g.setColor(COLOR_PLENTY);
+            g.drawString(dash, scoreStartX + scoreAW, scoreY);
+            g.setColor(plugin.getTeamBColor());
+            g.drawString(scoreB, scoreStartX + scoreAW + dashW, scoreY);
 
-        renderPossessionIndicator(g, scoreStartX, scoreAW, dashW, scoreBW, scoreY, ballIndicatorSpace);
-
-        renderGoalFlash(g);
-        renderWhistleFlash(g);
-        renderInterceptionFlash(g);
-        renderHostMessageFlash(g);
-        renderGameEndFlash(g);
+            renderPossessionIndicator(g, scoreStartX, scoreAW, dashW, scoreBW, scoreY, ballIndicatorSpace);
+        }
 
         return new Dimension(boxW, boxH);
     }
@@ -223,8 +244,8 @@ public class TimerOverlay extends Overlay
         if (team == null) return;
 
         boolean isTeamA = "TEAM_A".equals(team);
-        Color teamColor = isTeamA ? COLOR_TEAM_A : COLOR_TEAM_B;
-        Color otherColor = isTeamA ? COLOR_TEAM_B : COLOR_TEAM_A;
+        Color teamColor = isTeamA ? plugin.getTeamAColor() : plugin.getTeamBColor();
+        Color otherColor = isTeamA ? plugin.getTeamBColor() : plugin.getTeamAColor();
 
         float alpha = Math.min(1f, remaining / 500f);
         Color flashColor = withAlpha(teamColor, alpha);
@@ -316,7 +337,7 @@ public class TimerOverlay extends Overlay
         if (interceptingTeam == null || interceptingPlayer == null) return;
 
         boolean isTeamA = "TEAM_A".equals(interceptingTeam);
-        Color teamColor = isTeamA ? COLOR_TEAM_A : COLOR_TEAM_B;
+        Color teamColor = isTeamA ? plugin.getTeamAColor() : plugin.getTeamBColor();
 
         float alpha = Math.min(1f, remaining / 500f);
         Color flashColor = withAlpha(teamColor, alpha);
@@ -364,7 +385,7 @@ public class TimerOverlay extends Overlay
         Color shadowColor = new Color(0, 0, 0, (int) (180 * alpha));
         Color scoreColor = withAlpha(COLOR_PLENTY, alpha);
         Color winnerColor = winnerName == null ? COLOR_PLENTY
-            : winnerName.equals(plugin.getTeamAName()) ? COLOR_TEAM_A : COLOR_TEAM_B;
+            : winnerName.equals(plugin.getTeamAName()) ? plugin.getTeamAColor() : plugin.getTeamBColor();
         Color congratsColor = withAlpha(winnerColor, alpha);
 
         int canvasW = client.getCanvasWidth();
@@ -390,11 +411,11 @@ public class TimerOverlay extends Overlay
 
         g.setColor(scoreColor);
         g.drawString(label, scoreX, scoreY);
-        g.setColor(withAlpha(COLOR_TEAM_A, alpha));
+        g.setColor(withAlpha(plugin.getTeamAColor(), alpha));
         g.drawString(scoreAStr, scoreX + labelW, scoreY);
         g.setColor(scoreColor);
         g.drawString(dash, scoreX + labelW + aW, scoreY);
-        g.setColor(withAlpha(COLOR_TEAM_B, alpha));
+        g.setColor(withAlpha(plugin.getTeamBColor(), alpha));
         g.drawString(scoreBStr, scoreX + labelW + aW + dashW, scoreY);
 
         String congratsText = winnerName != null ? "Congratulations " + winnerName + "!" : "It's a tie!";

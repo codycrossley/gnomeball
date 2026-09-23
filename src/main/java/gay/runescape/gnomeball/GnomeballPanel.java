@@ -16,8 +16,6 @@ public class GnomeballPanel extends PluginPanel
     private static final int BORDER = 8;
     private static final Color COLOR_REFEREE = new Color(60, 179, 74);
     private static final Color COLOR_BALL    = new Color(255, 200, 60, 255);
-    private static final Color COLOR_TEAM_A  = new Color(60, 120, 220);
-    private static final Color COLOR_TEAM_B  = new Color(200, 60, 60);
     private static final Color ROW_EVEN      = new Color(40, 40, 40);
     private static final Color ROW_ODD       = new Color(50, 50, 50);
 
@@ -36,6 +34,11 @@ public class GnomeballPanel extends PluginPanel
     private final JPanel scoreboardPanel    = new JPanel();
     private final JTextField teamANameField = new JTextField("Team A");
     private final JTextField teamBNameField = new JTextField("Team B");
+    // Referee-clickable color swatches -- see wireColorSwatch(). A plain JPanel rather than a
+    // JButton so the team color itself (its background) IS the whole control, no separate icon
+    // or label needed.
+    private final JPanel teamAColorSwatch = new JPanel();
+    private final JPanel teamBColorSwatch = new JPanel();
     private final JLabel scoreALabel       = new JLabel("0");
     private final JLabel scoreBLabel       = new JLabel("0");
     private final JButton scoreAMinus = new JButton("-");
@@ -212,9 +215,8 @@ public class GnomeballPanel extends PluginPanel
         scoreboardPanel.setBorder(new EmptyBorder(6, 8, 6, 8));
         scoreboardPanel.setAlignmentX(LEFT_ALIGNMENT);
 
-        // Team A name
+        // Team A name (+ referee-clickable color swatch)
         teamANameField.setHorizontalAlignment(SwingConstants.CENTER);
-        teamANameField.setForeground(COLOR_TEAM_A);
         teamANameField.setFont(FontManager.getRunescapeBoldFont());
         teamANameField.setBackground(new Color(30, 30, 30));
         teamANameField.setBorder(BorderFactory.createEmptyBorder());
@@ -225,18 +227,24 @@ public class GnomeballPanel extends PluginPanel
         teamANameField.addFocusListener(new FocusAdapter() {
             @Override public void focusLost(FocusEvent e) { commitTeamName("TEAM_A", teamANameField.getText().trim()); }
         });
-        scoreboardPanel.add(teamANameField);
+        wireColorSwatch(teamAColorSwatch, "TEAM_A");
+        JPanel teamARow = new JPanel(new BorderLayout(4, 0));
+        teamARow.setBackground(new Color(30, 30, 30));
+        teamARow.setAlignmentX(CENTER_ALIGNMENT);
+        teamARow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        teamARow.add(teamAColorSwatch, BorderLayout.WEST);
+        teamARow.add(teamANameField, BorderLayout.CENTER);
+        scoreboardPanel.add(teamARow);
 
         // Team A score row
         JPanel scoreARow = new JPanel(new FlowLayout(FlowLayout.CENTER, 4, 2));
         scoreARow.setBackground(new Color(30, 30, 30));
         scoreARow.setAlignmentX(CENTER_ALIGNMENT);
         scoreARow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        scoreALabel.setForeground(COLOR_TEAM_A);
         scoreALabel.setFont(FontManager.getRunescapeBoldFont().deriveFont(16f));
         Insets btnInsets = new Insets(1, 6, 1, 6);
-        scoreAMinus.setMargin(btnInsets); scoreAMinus.setForeground(COLOR_TEAM_A);
-        scoreAPlus.setMargin(btnInsets);  scoreAPlus.setForeground(COLOR_TEAM_A);
+        scoreAMinus.setMargin(btnInsets);
+        scoreAPlus.setMargin(btnInsets);
         scoreAMinus.addActionListener(e -> plugin.onUpdateScore("TEAM_A", Math.max(0, plugin.getTeamAScore() - 1)));
         scoreAPlus.addActionListener(e -> plugin.onUpdateScore("TEAM_A", plugin.getTeamAScore() + 1));
         hostScoreAPanel.setLayout(new FlowLayout(FlowLayout.CENTER, 2, 0));
@@ -261,10 +269,9 @@ public class GnomeballPanel extends PluginPanel
         scoreBRow.setBackground(new Color(30, 30, 30));
         scoreBRow.setAlignmentX(CENTER_ALIGNMENT);
         scoreBRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
-        scoreBLabel.setForeground(COLOR_TEAM_B);
         scoreBLabel.setFont(FontManager.getRunescapeBoldFont().deriveFont(16f));
-        scoreBMinus.setMargin(btnInsets); scoreBMinus.setForeground(COLOR_TEAM_B);
-        scoreBPlus.setMargin(btnInsets);  scoreBPlus.setForeground(COLOR_TEAM_B);
+        scoreBMinus.setMargin(btnInsets);
+        scoreBPlus.setMargin(btnInsets);
         scoreBMinus.addActionListener(e -> plugin.onUpdateScore("TEAM_B", Math.max(0, plugin.getTeamBScore() - 1)));
         scoreBPlus.addActionListener(e -> plugin.onUpdateScore("TEAM_B", plugin.getTeamBScore() + 1));
         hostScoreBPanel.setLayout(new FlowLayout(FlowLayout.CENTER, 2, 0));
@@ -276,9 +283,8 @@ public class GnomeballPanel extends PluginPanel
         scoreBRow.add(hostScoreBPanel);
         scoreboardPanel.add(scoreBRow);
 
-        // Team B name
+        // Team B name (+ referee-clickable color swatch)
         teamBNameField.setHorizontalAlignment(SwingConstants.CENTER);
-        teamBNameField.setForeground(COLOR_TEAM_B);
         teamBNameField.setFont(FontManager.getRunescapeBoldFont());
         teamBNameField.setBackground(new Color(30, 30, 30));
         teamBNameField.setBorder(BorderFactory.createEmptyBorder());
@@ -289,7 +295,14 @@ public class GnomeballPanel extends PluginPanel
         teamBNameField.addFocusListener(new FocusAdapter() {
             @Override public void focusLost(FocusEvent e) { commitTeamName("TEAM_B", teamBNameField.getText().trim()); }
         });
-        scoreboardPanel.add(teamBNameField);
+        wireColorSwatch(teamBColorSwatch, "TEAM_B");
+        JPanel teamBRow = new JPanel(new BorderLayout(4, 0));
+        teamBRow.setBackground(new Color(30, 30, 30));
+        teamBRow.setAlignmentX(CENTER_ALIGNMENT);
+        teamBRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+        teamBRow.add(teamBColorSwatch, BorderLayout.WEST);
+        teamBRow.add(teamBNameField, BorderLayout.CENTER);
+        scoreboardPanel.add(teamBRow);
         card.add(scoreboardPanel);
         card.add(Box.createVerticalStrut(12));
 
@@ -638,7 +651,12 @@ public class GnomeballPanel extends PluginPanel
 
     private void refreshRoster(List<RosterReducer.RosterEntry> entries)
     {
-        String key = buildRosterKey(entries) + plugin.getTeamAName() + '|' + plugin.getTeamBName() + '|' + plugin.getPhase() + '|' + plugin.getBallHolder();
+        // Team colors are included here too -- the roster rows' role-colored number labels (see
+        // roleColor()) come straight from plugin.getTeamAColor()/getTeamBColor(), so a color
+        // change with nothing else different (same players, same names/phase/ball holder) would
+        // otherwise leave this cache key unchanged and the rebuild below would never run.
+        String key = buildRosterKey(entries) + plugin.getTeamAName() + '|' + plugin.getTeamBName() + '|'
+            + plugin.getTeamAColorHex() + '|' + plugin.getTeamBColorHex() + '|' + plugin.getPhase() + '|' + plugin.getBallHolder();
         if (key.equals(lastRosterKey)) return;
         lastRosterKey = key;
 
@@ -683,10 +701,14 @@ public class GnomeballPanel extends PluginPanel
             // Host gets the full role/ball management menu (those actions run on the host's write
             // key). A referee who isn't the host still gets the menu too, but only for the kick
             // entry inside it -- see buildRolePopup -- since kicking authenticates as the referee's
-            // own session token rather than the write key.
-            if (plugin.isHost() || plugin.isReferee())
+            // own session token rather than the write key. And a plain enlisted player who is
+            // neither gets it too, but only for their own row's Change Number entry.
+            String myRsn = plugin.getLocalRsn();
+            boolean isOwnEnlistedRow = myRsn != null && myRsn.equalsIgnoreCase(entry.rsn)
+                && (entry.role == GnomeballRole.TEAM_A || entry.role == GnomeballRole.TEAM_B);
+            if (plugin.isHost() || plugin.isReferee() || isOwnEnlistedRow)
             {
-                JPopupMenu popup = buildRolePopup(entry.rsn, entry.role);
+                JPopupMenu popup = buildRolePopup(entry.rsn, entry.role, entry.number);
                 attachPopup(row, popup);
                 attachPopup(numLabel, popup);
                 attachPopup(nameLabel, popup);
@@ -704,15 +726,28 @@ public class GnomeballPanel extends PluginPanel
         rosterTablePanel.repaint();
     }
 
-    private JPopupMenu buildRolePopup(String rsn, GnomeballRole current)
+    private JPopupMenu buildRolePopup(String rsn, GnomeballRole current, String number)
     {
         JPopupMenu popup = new JPopupMenu();
+        String localRsn = plugin.getLocalRsn();
+        boolean isSelf = localRsn != null && rsn.equalsIgnoreCase(localRsn);
+
+        // Self-service -- any enlisted team player can pick their own number, whether or not
+        // they're also the host/a referee. Not offered to referees/observers (see change_number
+        // server-side, which rejects them too -- they have no jersey number to begin with).
+        if (isSelf && (current == GnomeballRole.TEAM_A || current == GnomeballRole.TEAM_B))
+        {
+            JMenuItem changeNumber = new JMenuItem("Change Number");
+            changeNumber.addActionListener(e -> showChangeNumberDialog(number));
+            popup.add(changeNumber);
+        }
 
         // Ball/role management runs on the host's write key, so only actually offer it to the
         // host -- a non-host referee opening this same popup (see refreshRoster) only gets the
         // Kick Player entry below, added regardless of host status.
         if (plugin.isHost())
         {
+            if (popup.getComponentCount() > 0) popup.addSeparator();
             if (plugin.getPhase() == GamePhase.ACTIVE)
             {
                 String bh = plugin.getBallHolder();
@@ -746,8 +781,7 @@ public class GnomeballPanel extends PluginPanel
         // token, not the write key), so any referee sees it here -- not just the host. Frees a
         // slot a disconnected player left stuck without waiting for them, or removes a rogue
         // player. Not offered against yourself -- use Leave Game for that.
-        String localRsn = plugin.getLocalRsn();
-        if (plugin.isReferee() && (localRsn == null || !rsn.equalsIgnoreCase(localRsn)))
+        if (plugin.isReferee() && !isSelf)
         {
             if (popup.getComponentCount() > 0) popup.addSeparator();
             JMenuItem kick = new JMenuItem("Kick " + rsn);
@@ -797,6 +831,33 @@ public class GnomeballPanel extends PluginPanel
         int minutes = (Integer) minSpinner.getValue();
         int seconds = (Integer) secSpinner.getValue();
         plugin.onSetClockClicked((minutes * 60L + seconds) * 1000L);
+    }
+
+    /** Prompts the player for a new jersey number, prefilled with their current one, and pushes
+     * it via {@link GnomeballPlugin#onChangeNumberClicked}. Availability is validated server-side
+     * -- a taken number comes back as a chat message (see ApiClient#changeNumber), not a dialog
+     * error, since the rejection arrives asynchronously after this dialog has already closed. */
+    private void showChangeNumberDialog(String currentNumber)
+    {
+        int current = 1;
+        if (currentNumber != null && currentNumber.startsWith("#"))
+        {
+            try { current = Integer.parseInt(currentNumber.substring(1)); }
+            catch (NumberFormatException ignored) { }
+        }
+
+        JSpinner numberSpinner = new JSpinner(new SpinnerNumberModel(current, 1, 99, 1));
+        ((JSpinner.DefaultEditor) numberSpinner.getEditor()).getTextField().setColumns(3);
+
+        JPanel dialogPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        dialogPanel.add(new JLabel("Number:"));
+        dialogPanel.add(numberSpinner);
+
+        int choice = JOptionPane.showConfirmDialog(this, dialogPanel, "Change Number",
+            JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (choice != JOptionPane.OK_OPTION) return;
+
+        plugin.onChangeNumberClicked((Integer) numberSpinner.getValue());
     }
 
     private static final int CUSTOM_GRID_INDEX = 0;
@@ -875,9 +936,37 @@ public class GnomeballPanel extends PluginPanel
         plugin.onRenameTeam(team, name);
     }
 
+    /** Sets up a small clickable color square -- background/tooltip/cursor are kept current by
+     * refreshScoreboard(); this just wires the click itself, which opens a JColorChooser and
+     * pushes the pick to the server. Re-checks isReferee() at click time (not just cursor/tooltip
+     * state) since role can change between when the panel last refreshed and when it's clicked. */
+    private void wireColorSwatch(JPanel swatch, String team)
+    {
+        Dimension size = new Dimension(16, 16);
+        swatch.setPreferredSize(size);
+        swatch.setMinimumSize(size);
+        swatch.setMaximumSize(size);
+        swatch.setBorder(BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR, 1));
+        swatch.addMouseListener(new MouseAdapter()
+        {
+            @Override
+            public void mouseClicked(MouseEvent e)
+            {
+                if (!plugin.isReferee()) return;
+                String teamName = "TEAM_A".equals(team) ? plugin.getTeamAName() : plugin.getTeamBName();
+                Color current = "TEAM_A".equals(team) ? plugin.getTeamAColor() : plugin.getTeamBColor();
+                Color chosen = JColorChooser.showDialog(GnomeballPanel.this, "Choose " + teamName + " Color", current);
+                if (chosen != null) plugin.onSetTeamColorClicked(team, chosen);
+            }
+        });
+    }
+
     private void refreshScoreboard()
     {
         boolean isHost = plugin.isHost();
+        boolean isReferee = plugin.isReferee();
+        Color teamAColor = plugin.getTeamAColor();
+        Color teamBColor = plugin.getTeamBColor();
 
         if (!teamANameField.isFocusOwner())
             teamANameField.setText(plugin.getTeamAName());
@@ -886,9 +975,25 @@ public class GnomeballPanel extends PluginPanel
 
         teamANameField.setEditable(isHost);
         teamBNameField.setEditable(isHost);
+        teamANameField.setForeground(teamAColor);
+        teamBNameField.setForeground(teamBColor);
 
         scoreALabel.setText(String.valueOf(plugin.getTeamAScore()));
         scoreBLabel.setText(String.valueOf(plugin.getTeamBScore()));
+        scoreALabel.setForeground(teamAColor);
+        scoreBLabel.setForeground(teamBColor);
+        scoreAMinus.setForeground(teamAColor);
+        scoreAPlus.setForeground(teamAColor);
+        scoreBMinus.setForeground(teamBColor);
+        scoreBPlus.setForeground(teamBColor);
+
+        teamAColorSwatch.setBackground(teamAColor);
+        teamBColorSwatch.setBackground(teamBColor);
+        String swatchHint = isReferee ? "Click to change" : "Referees can change this";
+        teamAColorSwatch.setToolTipText(plugin.getTeamAName() + " color -- " + swatchHint);
+        teamBColorSwatch.setToolTipText(plugin.getTeamBName() + " color -- " + swatchHint);
+        teamAColorSwatch.setCursor(Cursor.getPredefinedCursor(isReferee ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
+        teamBColorSwatch.setCursor(Cursor.getPredefinedCursor(isReferee ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
 
         GamePhase phase = plugin.getPhase();
         boolean showScoreBtns = isHost && phase == GamePhase.ACTIVE;
@@ -896,13 +1001,13 @@ public class GnomeballPanel extends PluginPanel
         hostScoreBPanel.setVisible(showScoreBtns);
     }
 
-    private static Color roleColor(GnomeballRole role)
+    private Color roleColor(GnomeballRole role)
     {
         switch (role)
         {
             case REFEREE:  return COLOR_REFEREE;
-            case TEAM_A:   return COLOR_TEAM_A;
-            case TEAM_B:   return COLOR_TEAM_B;
+            case TEAM_A:   return plugin.getTeamAColor();
+            case TEAM_B:   return plugin.getTeamBColor();
             case OBSERVER: return ColorScheme.MEDIUM_GRAY_COLOR;
             default:       return Color.WHITE;
         }

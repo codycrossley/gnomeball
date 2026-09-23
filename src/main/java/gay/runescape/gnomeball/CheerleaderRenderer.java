@@ -21,8 +21,9 @@ import net.runelite.client.callback.ClientThread;
 
 /** Spawns a decorative Gnome cheerleader (NPC 3158) -- a real 3D model, not a 2D overlay -- at
  * every tile the host has marked with the "CHEERLEADER_A" or "CHEERLEADER_B" tile type, recolored
- * to that team's color (matching {@link GnomeballConfig}'s existing COLOR_TEAM_A/COLOR_TEAM_B, not
- * any particular real-NPC variant -- there's no confirmed usable cache ID for the actual blue/red
+ * to that team's current color ({@link GnomeballPlugin#getTeamAColor()}/getTeamBColor(), live-
+ * updated if a referee changes it -- see resolveModels() -- not any particular real-NPC variant;
+ * there's no confirmed usable cache ID for the actual blue/red
  * cheerleaders that appeared in the 2021 Realm of Memories event, so this recolors the regular
  * Cheerleader ourselves instead of depending on that). Reuses the exact same generic mark-tile/
  * unmark-tile sync mechanism {@link TileReducer} already provides for field/zone tiles, so this
@@ -53,9 +54,6 @@ public class CheerleaderRenderer
     private static final int NPC_ID_CHEERLEADER = 3158; // "Cheerleader" -- the real Gnome ball minigame NPC
     private static final int[] CHEER_ANIMATION_IDS = {211, 218}; // narrowed down from the full 211-218 pool by visual inspection
 
-    private static final int RGB_TEAM_A = 0x3C78DC; // matches GnomeballPlugin.COLOR_TEAM_A
-    private static final int RGB_TEAM_B = 0xC83C3C; // matches GnomeballPlugin.COLOR_TEAM_B
-
     // Idle chatter: how often a cheerleader spontaneously shouts "Go <team>!" with no game event
     // behind it, purely to look alive. Game-tick cadence (600ms) is plenty precise for deciding
     // "start talking now" -- unlike the animation-completion problem earlier, this isn't racing a
@@ -85,6 +83,11 @@ public class CheerleaderRenderer
 
     private Model cachedModelA;
     private Model cachedModelB;
+    // The team color hex each cached model was actually built with -- compared against the
+    // plugin's *current* color every resolveModels() call so a referee's color change triggers a
+    // rebuild instead of the stale cache silently sticking around forever.
+    private String lastHexA;
+    private String lastHexB;
     private boolean modelLoadFailed;
 
     public CheerleaderRenderer(Client client, ClientThread clientThread, GnomeballPlugin plugin)
@@ -137,6 +140,11 @@ public class CheerleaderRenderer
                 o.setModel(model);
                 return new CheerInstance(o, team);
             });
+            // Reasserted every tick, not just at creation -- cheap (a reference assignment), and
+            // it's what actually gets a color change onto a cheerleader that already existed
+            // before a referee changed it, same as setLocation()/setActive() below already do for
+            // position/visibility every tick regardless of whether either changed.
+            inst.obj.setModel(model);
             inst.point = entry.point;
 
             // computeIfAbsent's lambda only ever runs once per key, so if the animation resource
@@ -262,19 +270,30 @@ public class CheerleaderRenderer
         });
     }
 
-    /** Builds the two team-recolored models (once, cached thereafter). This NPC's composition
-     * defines no official recolor mapping at all ({@code getColorToReplace()}/
+    /** Builds the two team-recolored models, cached thereafter until a referee changes a team's
+     * color (see {@link #lastHexA}/{@link #lastHexB}), at which point just that team's model gets
+     * rebuilt -- every already-spawned cheerleader picks up the new reference on the very next
+     * tick since {@link #sync} reassigns it unconditionally, not just at creation. This NPC's
+     * composition defines no official recolor mapping at all ({@code getColorToReplace()}/
      * {@code getColorToReplaceWith()} are both null -- confirmed by logging them directly), so
-     * there's no swappable slot to redirect via the normal {@code client.loadModel(id,
-     * colorToReplace, colorToReplaceWith)} idiom. Instead this hue-shifts the raw mesh by hand
-     * (see {@link #hueShift}) before lighting it into a final renderable {@link Model}. */
+     * there's no swappable slot to redirect
+     * via the normal {@code client.loadModel(id, colorToReplace, colorToReplaceWith)} idiom.
+     * Instead this hue-shifts the raw mesh by hand (see {@link #hueShift}) before lighting it
+     * into a final renderable {@link Model}. */
     private boolean resolveModels()
     {
-        if ((cachedModelA != null && cachedModelB != null) || modelLoadFailed) return cachedModelA != null;
+        if (modelLoadFailed) return false;
+
+        String hexA = plugin.getTeamAColorHex();
+        String hexB = plugin.getTeamBColorHex();
+        boolean needA = cachedModelA == null || !hexA.equals(lastHexA);
+        boolean needB = cachedModelB == null || !hexB.equals(lastHexB);
+        if (!needA && !needB) return true;
+
         try
         {
             NPCComposition comp = client.getNpcDefinition(NPC_ID_CHEERLEADER);
-            if (comp == null) return false;
+            if (comp == null) return false; // not loaded yet -- retry next tick
             int[] modelIds = comp.getModels();
             if (modelIds == null || modelIds.length == 0)
             {
@@ -282,8 +301,16 @@ public class CheerleaderRenderer
                 return false;
             }
 
-            cachedModelA = buildHueShiftedModel(modelIds, RGB_TEAM_A);
-            cachedModelB = buildHueShiftedModel(modelIds, RGB_TEAM_B);
+            if (needA)
+            {
+                cachedModelA = buildHueShiftedModel(modelIds, plugin.getTeamAColor().getRGB() & 0xFFFFFF);
+                lastHexA = hexA;
+            }
+            if (needB)
+            {
+                cachedModelB = buildHueShiftedModel(modelIds, plugin.getTeamBColor().getRGB() & 0xFFFFFF);
+                lastHexB = hexB;
+            }
         }
         catch (Exception ignored)
         {

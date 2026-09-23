@@ -20,8 +20,6 @@ public class TileOverlay extends Overlay
 {
     private static final Color COLOR_UNKNOWN_TYPE = new Color(255, 255, 0); // fallback for any tile type not explicitly recognized below
     private static final Color COLOR_FIELD    = new Color(255, 255, 255);
-    private static final Color COLOR_ZONE_A   = new Color(60, 120, 220);
-    private static final Color COLOR_ZONE_B   = new Color(200, 60, 60);
     private static final Color COLOR_OUT_OF_BOUNDS_FLASH = new Color(255, 210, 0);
     private static final long  OUT_OF_BOUNDS_PULSE_PERIOD_MS = 260;
     // Matches TimerOverlay's own running-outline/pause-glow exactly (same colors, same pulse
@@ -66,7 +64,10 @@ public class TileOverlay extends Overlay
     {
         if (!config.showTileOverlay()) return null;
         GamePhase phase = plugin.getPhase();
-        if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return null;
+        // The winning team's field flash (see resolveFieldEndFlashColor) now fires on GAME_ENDED
+        // itself, so keep drawing through ENDED for just that brief window.
+        boolean fieldEndFlashing = phase == GamePhase.ENDED && System.currentTimeMillis() < plugin.getFieldEndFlashUntil();
+        if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE && !fieldEndFlashing) return null;
 
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
@@ -214,9 +215,9 @@ public class TileOverlay extends Overlay
         return withAlpha(COLOR_FIELD_RUNNING, 220);
     }
 
-    /** Returns a brief flash of the winning team's own color (matching {@link #COLOR_ZONE_A}/
-     * {@link #COLOR_ZONE_B}, the same colors that team's zone tiles already render in) the moment
-     * the clock hits 0, or null if there's no flash active right now -- including the tie case,
+    /** Returns a brief flash of the winning team's own color (the same color that team's zone
+     * tiles already render in, via plugin.getTeamAColor()/getTeamBColor()) the moment
+     * the host ends the game, or null if there's no flash active right now -- including the tie case,
      * where {@link GnomeballPlugin#getFieldEndFlashTeam()} is left null and nothing ever flashes.
      * Fades out over the flash's final 500ms, the same fade curve TimerOverlay's own goal-flash
      * uses. */
@@ -229,7 +230,7 @@ public class TileOverlay extends Overlay
         String team = plugin.getFieldEndFlashTeam();
         if (team == null) return null; // tie -- no flash
 
-        Color base = "TEAM_A".equals(team) ? COLOR_ZONE_A : COLOR_ZONE_B;
+        Color base = "TEAM_A".equals(team) ? plugin.getTeamAColor() : plugin.getTeamBColor();
         float alpha = Math.min(1f, (until - now) / 500f);
         return withAlpha(base, (int) (220 * alpha));
     }
@@ -370,15 +371,15 @@ public class TileOverlay extends Overlay
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
     }
 
-    private static Color defaultColorFor(String tileType)
+    private Color defaultColorFor(String tileType)
     {
         if ("FIELD".equals(tileType)) return COLOR_FIELD;
-        if ("ZONE_A".equals(tileType) || "GOALPOST_A".equals(tileType)) return COLOR_ZONE_A;
-        if ("ZONE_B".equals(tileType) || "GOALPOST_B".equals(tileType)) return COLOR_ZONE_B;
+        if ("ZONE_A".equals(tileType) || "GOALPOST_A".equals(tileType)) return plugin.getTeamAColor();
+        if ("ZONE_B".equals(tileType) || "GOALPOST_B".equals(tileType)) return plugin.getTeamBColor();
         return COLOR_UNKNOWN_TYPE;
     }
 
-    private static Color resolveColor(String hex, String tileType)
+    private Color resolveColor(String hex, String tileType)
     {
         if (hex == null || hex.isBlank()) return defaultColorFor(tileType);
         try { return Color.decode(hex); }

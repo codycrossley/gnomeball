@@ -13,13 +13,10 @@ public class PlayerOverlay extends Overlay
 {
     private static final Color COLOR_REFEREE = new Color(60, 179, 74);
     private static final Color COLOR_BALL    = new Color(255, 210, 0);
-    private static final Color COLOR_TEAM_A  = new Color(17, 104, 253);
-    private static final Color COLOR_TEAM_B  = new Color(200, 60, 60);
     private static final Color COLOR_TAG_ARROW = new Color(255, 210, 0);
     private static final long  TAG_ARROW_PERIOD_MS = 800;
     private static final String PASS_LABEL = "PASS";
-    private static final Color COLOR_TEAM_A_OUTLINE  = new Color(17, 104, 253, 180);
-    private static final Color COLOR_TEAM_B_OUTLINE  = new Color(200, 60, 60, 180);
+    private static final int   OUTLINE_ALPHA = 180;
     private static final Color COLOR_REFEREE_OUTLINE = new Color(60, 179, 74, 180);
     private static final int   FIELD_OUTLINE_WIDTH = 2;
     private static final int   FIELD_OUTLINE_FEATHER = 2;
@@ -77,8 +74,8 @@ public class PlayerOverlay extends Overlay
                 Color outlineColor;
                 switch (role)
                 {
-                    case TEAM_A:  outlineColor = COLOR_TEAM_A_OUTLINE; break;
-                    case TEAM_B:  outlineColor = COLOR_TEAM_B_OUTLINE; break;
+                    case TEAM_A:  outlineColor = withAlpha(plugin.getTeamAColor(), OUTLINE_ALPHA); break;
+                    case TEAM_B:  outlineColor = withAlpha(plugin.getTeamBColor(), OUTLINE_ALPHA); break;
                     case REFEREE: outlineColor = COLOR_REFEREE_OUTLINE; break;
                     default:      outlineColor = null;
                 }
@@ -245,14 +242,19 @@ public class PlayerOverlay extends Overlay
         g.drawString(PASS_LABEL, cx - labelWidth / 2, labelY);
     }
 
-    private static Color roleColor(GnomeballRole role)
+    private Color roleColor(GnomeballRole role)
     {
         switch (role)
         {
             case REFEREE: return COLOR_REFEREE;
-            case TEAM_A:  return COLOR_TEAM_A;
-            case TEAM_B:  return COLOR_TEAM_B;
+            case TEAM_A:  return plugin.getTeamAColor();
+            case TEAM_B:  return plugin.getTeamBColor();
             default:      return Color.WHITE;
         }
+    }
+
+    private static Color withAlpha(Color c, int alpha)
+    {
+        return new Color(c.getRed(), c.getGreen(), c.getBlue(), alpha);
     }
 }

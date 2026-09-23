@@ -106,4 +106,81 @@ public class ApiClientTest
         assertEquals("wk", result.writeKey);
         assertEquals("pt", result.playerToken);
     }
+
+    @Test
+    public void setTeamColorPostsPlayerTeamAndColor() throws Exception
+    {
+        server.enqueue(new MockResponse().setResponseCode(200).setBody("{\"ok\":true}"));
+
+        apiClient.setTeamColor("game1", "RefRsn", "TEAM_A", "FF00FF", "reftoken123");
+
+        RecordedRequest req = server.takeRequest(5, TimeUnit.SECONDS);
+        assertEquals("/gnomeball/v1/games/game1/set-team-color", req.getPath());
+        assertEquals("Bearer reftoken123", req.getHeader("Authorization"));
+
+        JsonObject body = bodyOf(req);
+        assertEquals("RefRsn", body.get("player").getAsString());
+        assertEquals("TEAM_A", body.get("team").getAsString());
+        assertEquals("FF00FF", body.get("color").getAsString());
+    }
+
+    @Test(expected = IOException.class)
+    public void setTeamColorThrowsOnNonSuccessResponse() throws Exception
+    {
+        server.enqueue(new MockResponse().setResponseCode(403).setBody("{\"detail\":\"Player is not a referee\"}"));
+
+        apiClient.setTeamColor("game1", "NotARef", "TEAM_A", "FF00FF", "sometoken");
+    }
+
+    @Test
+    public void changeNumberPostsPlayerAndNumber() throws Exception
+    {
+        server.enqueue(new MockResponse().setResponseCode(200).setBody("{\"ok\":true}"));
+
+        apiClient.changeNumber("game1", "PlayerRsn", 42, "playertoken");
+
+        RecordedRequest req = server.takeRequest(5, TimeUnit.SECONDS);
+        assertEquals("/gnomeball/v1/games/game1/change-number", req.getPath());
+        assertEquals("Bearer playertoken", req.getHeader("Authorization"));
+
+        JsonObject body = bodyOf(req);
+        assertEquals("PlayerRsn", body.get("player").getAsString());
+        assertEquals(42, body.get("number").getAsInt());
+    }
+
+    /** changeNumber is the one ApiClient method whose failure message a caller shows straight to
+     * the player in chat (see GnomeballPlugin#onChangeNumberClicked) -- this pins down that the
+     * IOException's message is the server's clean "detail" text, not a raw JSON body dump. */
+    @Test
+    public void changeNumberFailureMessageIsTheCleanServerDetailNotRawJson()
+    {
+        server.enqueue(new MockResponse().setResponseCode(409)
+            .setBody("{\"detail\":\"Number 7 is already taken by SomeOtherPlayer\"}"));
+
+        try
+        {
+            apiClient.changeNumber("game1", "PlayerRsn", 7, "playertoken");
+            fail("expected an IOException");
+        }
+        catch (IOException e)
+        {
+            assertEquals("Number 7 is already taken by SomeOtherPlayer", e.getMessage());
+        }
+    }
+
+    @Test
+    public void changeNumberFailureFallsBackToAGenericMessageForAnUnshapedErrorBody()
+    {
+        server.enqueue(new MockResponse().setResponseCode(500).setBody("not json"));
+
+        try
+        {
+            apiClient.changeNumber("game1", "PlayerRsn", 7, "playertoken");
+            fail("expected an IOException");
+        }
+        catch (IOException e)
+        {
+            assertEquals("Request failed (500)", e.getMessage());
+        }
+    }
 }

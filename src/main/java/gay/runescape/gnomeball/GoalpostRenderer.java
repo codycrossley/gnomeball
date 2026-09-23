@@ -17,7 +17,8 @@ import net.runelite.client.callback.ClientThread;
 
 /** Spawns a decorative team-colored goalpost -- a real 3D model, not a 2D overlay -- at every tile
  * the host has marked with the "GOALPOST_A" or "GOALPOST_B" tile type, recolored to that team's
- * color (matching {@link GnomeballConfig}'s existing COLOR_TEAM_A/COLOR_TEAM_B). Reuses the exact
+ * current color ({@link GnomeballPlugin#getTeamAColor()}/getTeamBColor(), live-updated if a
+ * referee changes it -- see resolveModels()). Reuses the exact
  * same generic mark-tile/unmark-tile sync mechanism {@link TileReducer} already provides for
  * field/zone tiles, same as {@link CheerleaderRenderer}.
  *
@@ -43,21 +44,25 @@ public class GoalpostRenderer
     private static final int DEFAULT_ORIENTATION_TEAM_A = 1536;
     private static final int DEFAULT_ORIENTATION_TEAM_B = 512;
 
-    private static final int RGB_TEAM_A = 0x3C78DC; // matches GnomeballPlugin.COLOR_TEAM_A
-    private static final int RGB_TEAM_B = 0xC83C3C; // matches GnomeballPlugin.COLOR_TEAM_B
-
     private final Client client;
     private final ClientThread clientThread;
+    private final GnomeballPlugin plugin;
     private final Map<String, RuneLiteObject> active = new HashMap<>();
 
     private Model cachedModelA;
     private Model cachedModelB;
+    // The team color hex each cached model was actually built with -- see CheerleaderRenderer's
+    // own lastHexA/lastHexB for why this needs tracking (a referee changing a team's color mid-
+    // game must trigger a rebuild, not leave the cache silently stale).
+    private String lastHexA;
+    private String lastHexB;
     private boolean modelLoadFailed;
 
-    public GoalpostRenderer(Client client, ClientThread clientThread)
+    public GoalpostRenderer(Client client, ClientThread clientThread, GnomeballPlugin plugin)
     {
         this.client = client;
         this.clientThread = clientThread;
+        this.plugin = plugin;
     }
 
     /** Must be called on the client thread (game-tick handlers already are). Reconciles the active
@@ -102,6 +107,10 @@ public class GoalpostRenderer
                 o.setOrientation(orientation);
                 return o;
             });
+            // Reasserted every tick, not just at creation -- see CheerleaderRenderer#sync's
+            // identical comment on why this is what actually gets a color change onto a goalpost
+            // that already existed before a referee changed it.
+            obj.setModel(model);
 
             LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), entry.point);
             if (lp == null)
@@ -128,23 +137,42 @@ public class GoalpostRenderer
         });
     }
 
-    /** Builds the two team-recolored models (once, cached thereafter). Loads the raw mesh fresh
-     * per team (rather than reusing one {@link ModelData} instance for both) since {@code
-     * recolor()} mutates its face-color data -- reusing one instance across both builds would
-     * compound A's shift into B's. No confirmed swap slot on this model to redirect via the normal
-     * {@code client.loadModel(id, colorToFind, colorToReplace)} idiom, so this hue-shifts the raw
-     * mesh by hand instead, same approach as {@link CheerleaderRenderer#buildHueShiftedModel}. */
+    /** Builds the two team-recolored models, cached thereafter until a referee changes a team's
+     * color (see {@link #lastHexA}/{@link #lastHexB}), at which point just that team's model gets
+     * rebuilt -- every already-spawned goalpost picks up the new reference on the very next tick
+     * since {@link #sync} reassigns it unconditionally, not just at creation. Loads the raw mesh
+     * fresh per rebuild (rather than reusing one {@link ModelData} instance) since {@code
+     * recolor()} mutates its face-color data -- reusing one instance across both teams' builds
+     * would compound A's shift into B's. No confirmed swap slot on this model to redirect via the
+     * normal {@code client.loadModel(id, colorToFind, colorToReplace)} idiom, so this hue-shifts
+     * the raw mesh by hand instead, same approach as
+     * {@link CheerleaderRenderer#buildHueShiftedModel}. */
     private boolean resolveModels()
     {
-        if ((cachedModelA != null && cachedModelB != null) || modelLoadFailed) return cachedModelA != null;
+        if (modelLoadFailed) return false;
+
+        String hexA = plugin.getTeamAColorHex();
+        String hexB = plugin.getTeamBColorHex();
+        boolean needA = cachedModelA == null || !hexA.equals(lastHexA);
+        boolean needB = cachedModelB == null || !hexB.equals(lastHexB);
+        if (!needA && !needB) return true;
+
         try
         {
-            ModelData dataA = client.loadModelData(MODEL_ID_GOALPOST);
-            ModelData dataB = client.loadModelData(MODEL_ID_GOALPOST);
-            if (dataA == null || dataB == null) return false; // not loaded yet -- retry next tick
-
-            cachedModelA = buildHueShiftedModel(dataA, RGB_TEAM_A);
-            cachedModelB = buildHueShiftedModel(dataB, RGB_TEAM_B);
+            if (needA)
+            {
+                ModelData dataA = client.loadModelData(MODEL_ID_GOALPOST);
+                if (dataA == null) return false; // not loaded yet -- retry next tick
+                cachedModelA = buildHueShiftedModel(dataA, plugin.getTeamAColor().getRGB() & 0xFFFFFF);
+                lastHexA = hexA;
+            }
+            if (needB)
+            {
+                ModelData dataB = client.loadModelData(MODEL_ID_GOALPOST);
+                if (dataB == null) return false; // not loaded yet -- retry next tick
+                cachedModelB = buildHueShiftedModel(dataB, plugin.getTeamBColor().getRGB() & 0xFFFFFF);
+                lastHexB = hexB;
+            }
         }
         catch (Exception ignored)
         {

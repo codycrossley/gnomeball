@@ -3,6 +3,7 @@ package gay.runescape.gnomeball;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import okhttp3.*;
 import java.io.IOException;
 import java.util.Collections;
@@ -219,6 +220,53 @@ public class ApiClient
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Rename team failed (" + resp.code() + "): " + raw);
         }
+    }
+
+    /** Referee-token-authenticated (any referee, not just the host) -- see the server's own
+     * set_team_color for why this doesn't use the write key the way renameTeam above does. */
+    public void setTeamColor(String gameId, String refereeRsn, String team, String colorHex, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", refereeRsn);
+        body.addProperty("team", team);
+        body.addProperty("color", colorHex);
+
+        try (Response resp = post("/v1/games/" + gameId + "/set-team-color", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Set team color failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    /** Self-service: the player picks their own jersey number. Unlike every other ApiClient
+     * method's IOException, this one's message is the server's own clean "detail" text (e.g.
+     * "Number 7 is already taken by SomeRsn") rather than a raw JSON dump -- the caller shows it
+     * straight to the player in a chat message, not just a debug log. */
+    public void changeNumber(String gameId, String playerRsn, int number, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("number", number);
+
+        try (Response resp = post("/v1/games/" + gameId + "/change-number", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException(extractErrorDetail(raw, resp.code()));
+        }
+    }
+
+    /** Pulls the "detail" field out of FastAPI's default error body ({"detail": "..."}) for a
+     * clean, human-readable message -- falls back to a generic one if the body isn't shaped that
+     * way (a network-level failure, an unexpected 500, etc). */
+    private static String extractErrorDetail(String rawJson, int code)
+    {
+        try
+        {
+            JsonObject obj = new JsonParser().parse(rawJson).getAsJsonObject();
+            if (obj.has("detail") && !obj.get("detail").isJsonNull()) return obj.get("detail").getAsString();
+        }
+        catch (Exception ignored) { }
+        return "Request failed (" + code + ")";
     }
 
     public void updateScore(String gameId, String writeKey, String team, int score) throws IOException
@@ -598,6 +646,8 @@ public class ApiClient
         public Long pausedRemainingMs;
         public String teamAName;
         public String teamBName;
+        public String teamAColor; // 6 hex digits, no leading '#' -- see GnomeballPlugin's hexToColor
+        public String teamBColor;
         public int teamAScore;
         public int teamBScore;
         public Boolean obligationActive;

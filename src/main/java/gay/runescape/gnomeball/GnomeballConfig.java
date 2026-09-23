@@ -28,4 +28,26 @@ public interface GnomeballConfig extends Config
     {
         return true;
     }
+
+    @ConfigItem(
+        keyName = "showScoreboard",
+        name = "Show scoreboard",
+        description = "Show the team scores and ball possession indicator",
+        position = 2
+    )
+    default boolean showScoreboard()
+    {
+        return true;
+    }
+
+    @ConfigItem(
+        keyName = "showClock",
+        name = "Show clock",
+        description = "Show the game clock and game status",
+        position = 3
+    )
+    default boolean showClock()
+    {
+        return true;
+    }
 }

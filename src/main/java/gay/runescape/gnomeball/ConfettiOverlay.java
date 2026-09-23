@@ -20,11 +20,6 @@ import net.runelite.client.ui.overlay.OverlayPriority;
  * measured wall-clock delta rather than assuming a constant frame time. */
 public class ConfettiOverlay extends Overlay
 {
-    // Matches TileOverlay's own COLOR_ZONE_A/COLOR_ZONE_B -- same colors that team's zone tiles
-    // and field-end flash already render in.
-    private static final Color COLOR_TEAM_A = new Color(60, 120, 220);
-    private static final Color COLOR_TEAM_B = new Color(200, 60, 60);
-
     // Fallback burst for a tie, when there's no single winning team's color to draw from.
     private static final Color[] TIE_PALETTE = {
         new Color(255, 80, 80),
@@ -108,7 +103,7 @@ public class ConfettiOverlay extends Overlay
         String team = plugin.getFieldEndFlashTeam();
         if (team == null) return TIE_PALETTE;
 
-        Color base = "TEAM_A".equals(team) ? COLOR_TEAM_A : COLOR_TEAM_B;
+        Color base = "TEAM_A".equals(team) ? plugin.getTeamAColor() : plugin.getTeamBColor();
         return new Color[] {
             shade(base, 0.55f),
             shade(base, 0.8f),
