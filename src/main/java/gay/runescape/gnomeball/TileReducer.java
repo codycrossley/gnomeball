@@ -10,6 +10,12 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class TileReducer
 {
+    /** Referee-placed "go here" marker (see FlagRenderer) -- rides the same mark/unmark sync as
+     * every other tile type, but is never part of the field's footprint, so anything that treats
+     * the tile set as "the field" (saving a custom slot, Clear Arena) should use
+     * {@link #fieldSnapshot()} instead of {@link #snapshot()}. */
+    public static final String FLAG = "FLAG";
+
     public static final class TileEntry
     {
         public final WorldPoint point;
@@ -136,6 +142,27 @@ public class TileReducer
         return Collections.unmodifiableList(new ArrayList<>(tiles.values()));
     }
 
+    /** Every tile except FLAG markers -- the field/zone/cheerleader/goalpost layout on its own. */
+    public List<TileEntry> fieldSnapshot()
+    {
+        List<TileEntry> result = new ArrayList<>();
+        for (TileEntry e : tiles.values())
+        {
+            if (!FLAG.equals(e.tileType)) result.add(e);
+        }
+        return Collections.unmodifiableList(result);
+    }
+
+    public List<WorldPoint> flagPoints()
+    {
+        List<WorldPoint> result = new ArrayList<>();
+        for (TileEntry e : tiles.values())
+        {
+            if (FLAG.equals(e.tileType)) result.add(e.point);
+        }
+        return result;
+    }
+
     public boolean hasMarker(WorldPoint wp, String tileType)
     {
         if (wp == null) return false;
@@ -146,9 +173,12 @@ public class TileReducer
     {
         if (wp == null) return false;
         String prefix = wp.getX() + ":" + wp.getY() + ":" + wp.getPlane() + ":";
+        String flagKey = prefix + FLAG;
         for (String k : tiles.keySet())
         {
-            if (k.startsWith(prefix)) return true;
+            // A flag isn't a field marking -- a flag-only tile should still offer the host "Mark
+            // Tile", not "Edit Tile"/"Unmark All".
+            if (k.startsWith(prefix) && !k.equals(flagKey)) return true;
         }
         return false;
     }

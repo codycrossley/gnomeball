@@ -150,10 +150,12 @@ public class CheerleaderRenderer
             if (lp == null)
             {
                 inst.obj.setActive(false);
+                inst.visible = false;
                 continue;
             }
             inst.obj.setLocation(lp, entry.point.getPlane());
             inst.obj.setActive(true);
+            inst.visible = true;
 
             updateChatter(inst);
         }
@@ -185,23 +187,35 @@ public class CheerleaderRenderer
     {
         String cheerleaderTeam = "TEAM_A".equals(team) ? "CHEERLEADER_A" : "CHEERLEADER_B";
         long expiresAt = System.currentTimeMillis() + durationMs;
-        for (CheerInstance inst : active.values())
+
+        // Callers include the WebSocket event-handling thread (a live GOAL_SCORED shout), not just
+        // client-thread callers -- `active` is a plain HashMap that sync() iterates/mutates every
+        // tick on the client thread, so writing into it from another thread here without
+        // dispatching first is a real data race (torn iteration, lost removals). Same fix as
+        // clear() already applies below.
+        clientThread.invoke(() ->
         {
-            if (!cheerleaderTeam.equals(inst.team)) continue;
-            inst.speechText = text;
-            inst.speechExpiresAtMs = expiresAt;
-        }
+            for (CheerInstance inst : active.values())
+            {
+                if (!cheerleaderTeam.equals(inst.team)) continue;
+                inst.speechText = text;
+                inst.speechExpiresAtMs = expiresAt;
+            }
+        });
     }
 
     /** Read by {@link CheerleaderSpeechOverlay} every frame -- whatever's currently being said,
-     * for every cheerleader saying something right now. */
+     * for every cheerleader saying something right now. Excludes any cheerleader whose model isn't
+     * currently placed in the scene (see {@code visible} on {@link CheerInstance}) -- otherwise a
+     * mid-chatter cheerleader that drops out of the loaded scene (e.g. a region boundary) keeps
+     * talking with no visible body standing under the text. */
     public List<SpeechBubble> getActiveSpeechBubbles()
     {
         long now = System.currentTimeMillis();
         List<SpeechBubble> bubbles = new ArrayList<>();
         for (CheerInstance inst : active.values())
         {
-            if (inst.speechText != null && now < inst.speechExpiresAtMs)
+            if (inst.visible && inst.speechText != null && now < inst.speechExpiresAtMs)
             {
                 bubbles.add(new SpeechBubble(inst.point, inst.speechText));
             }
@@ -340,6 +354,10 @@ public class CheerleaderRenderer
         String speechText;
         long speechExpiresAtMs;
         long nextChatterAtMs;
+        // Whether the model is actually placed in the currently loaded scene right now -- false
+        // while LocalPoint.fromWorld() can't resolve it (see sync()). Starts false since a
+        // freshly-created instance hasn't been confirmed placed yet.
+        boolean visible = false;
 
         CheerInstance(RuneLiteObject obj, String team)
         {

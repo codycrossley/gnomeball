@@ -109,9 +109,11 @@ public class TileOverlay extends Overlay
             // Rendered as a real 3D NPC model by CheerleaderRenderer instead -- would otherwise
             // double up as both a flat colored tile here and a model standing on top of it.
             boolean isCheerleader = "CHEERLEADER_A".equals(entry.tileType) || "CHEERLEADER_B".equals(entry.tileType);
+            // Same for referee flags -- rendered as a model + spotanim by FlagRenderer.
+            boolean isFlag = TileReducer.FLAG.equals(entry.tileType);
             Set<WorldPoint> outlineSet = byType.get(entry.tileType);
             if (outlineSet != null) outlineSet.add(entry.point);
-            else if (!isCheerleader) fill.add(entry);
+            else if (!isCheerleader && !isFlag) fill.add(entry);
         }
 
         Map<String, Set<WorldPoint>> connectivity = new HashMap<>();

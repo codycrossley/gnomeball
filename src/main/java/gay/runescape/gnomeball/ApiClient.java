@@ -19,8 +19,17 @@ public class ApiClient
 
     private final OkHttpClient http;
     private final Gson gson;
+    private final String baseUrl;
 
     public ApiClient(OkHttpClient httpClient, Gson gson)
+    {
+        this(httpClient, gson, BASE_URL);
+    }
+
+    /** Same as the two-arg constructor but against an arbitrary base URL -- lets tests point
+     * this at a MockWebServer instead of BASE_URL, the same seam EventSocket already exposes via
+     * its own base-URL constructor. */
+    public ApiClient(OkHttpClient httpClient, Gson gson, String baseUrl)
     {
         this.http = httpClient.newBuilder()
             .connectTimeout(10, TimeUnit.SECONDS)
@@ -28,6 +37,7 @@ public class ApiClient
             .writeTimeout(15, TimeUnit.SECONDS)
             .build();
         this.gson = gson;
+        this.baseUrl = baseUrl;
     }
 
     // -------------------------------------------------------------------------
@@ -118,6 +128,19 @@ public class ApiClient
         {
             String raw = bodyString(resp);
             if (!resp.isSuccessful()) throw new IOException("Tag player failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    public void kickPlayer(String gameId, String refereeRsn, String targetRsn, String playerToken) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", refereeRsn);
+        body.addProperty("target", targetRsn);
+
+        try (Response resp = post("/v1/games/" + gameId + "/kick-player", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Kick player failed (" + resp.code() + "): " + raw);
         }
     }
 
@@ -304,10 +327,42 @@ public class ApiClient
         }
     }
 
+    /** Referee-only: places a FLAG tile at (x, y, plane). Authenticated with the referee's own
+     * session token rather than the host's write key -- see flag-tile on the server. */
+    public void flagTile(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
+
+        try (Response resp = post("/v1/games/" + gameId + "/flag-tile", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Flag tile failed (" + resp.code() + "): " + raw);
+        }
+    }
+
+    public void unflagTile(String gameId, String playerRsn, String playerToken, int x, int y, int plane) throws IOException
+    {
+        JsonObject body = new JsonObject();
+        body.addProperty("player", playerRsn);
+        body.addProperty("x", x);
+        body.addProperty("y", y);
+        body.addProperty("plane", plane);
+
+        try (Response resp = post("/v1/games/" + gameId + "/unflag-tile", body, playerToken))
+        {
+            String raw = bodyString(resp);
+            if (!resp.isSuccessful()) throw new IOException("Unflag tile failed (" + resp.code() + "): " + raw);
+        }
+    }
+
     public TilesResponse fetchTiles(String gameId) throws IOException
     {
         Request req = new Request.Builder()
-            .url(BASE_URL + "/v1/games/" + gameId + "/tiles")
+            .url(baseUrl + "/v1/games/" + gameId + "/tiles")
             .get()
             .build();
 
@@ -395,7 +450,7 @@ public class ApiClient
     public ReadEventsResponse readEvents(String gameId, int afterSeq) throws IOException
     {
         Request req = new Request.Builder()
-            .url(BASE_URL + "/v1/games/" + gameId + "/events?afterSeq=" + afterSeq)
+            .url(baseUrl + "/v1/games/" + gameId + "/events?afterSeq=" + afterSeq)
             .get()
             .build();
 
@@ -413,7 +468,7 @@ public class ApiClient
     public RosterSnapshot fetchRoster(String gameId) throws IOException
     {
         Request req = new Request.Builder()
-            .url(BASE_URL + "/v1/games/" + gameId + "/roster")
+            .url(baseUrl + "/v1/games/" + gameId + "/roster")
             .get()
             .build();
 
@@ -435,7 +490,7 @@ public class ApiClient
     private Response post(String path, JsonObject body, String writeKey) throws IOException
     {
         Request.Builder builder = new Request.Builder()
-            .url(BASE_URL + path)
+            .url(baseUrl + path)
             .post(RequestBody.create(JSON, gson.toJson(body)));
         if (writeKey != null && !writeKey.isEmpty())
         {

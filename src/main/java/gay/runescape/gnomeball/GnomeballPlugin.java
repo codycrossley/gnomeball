@@ -34,11 +34,14 @@ import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
 import net.runelite.api.PlayerComposition;
 import net.runelite.api.Tile;
+import net.runelite.api.Point;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.AnimationChanged;
+import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuEntryAdded;
+import net.runelite.api.events.MenuOpened;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.kit.KitType;
 import net.runelite.client.callback.ClientThread;
@@ -115,6 +118,7 @@ public class GnomeballPlugin extends Plugin
     private TileReducer tileReducer;
     private CheerleaderRenderer cheerleaderRenderer;
     private GoalpostRenderer goalpostRenderer;
+    private FlagRenderer flagRenderer;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r ->
     {
@@ -201,10 +205,10 @@ public class GnomeballPlugin extends Plugin
     // checkClockExpiry) so a referee pausing right at the buzzer and resuming afterward doesn't
     // cause a spurious replay.
     private volatile boolean clockAtZero = false;
-    private volatile long goalFlashUntil = 0;
-    private volatile String goalFlashTeam = null;
-    private volatile int goalFlashOldScore = 0;
-    private volatile int goalFlashNewScore = 0;
+    // See GoalFlashQueue's own javadoc -- callers include the WebSocket event thread, the
+    // roster-poll executor thread, and the client thread (an optimistic local score) alike; the
+    // queue itself is internally synchronized so no extra locking is needed here.
+    private final GoalFlashQueue goalFlashQueue = new GoalFlashQueue();
     private volatile long whistleFlashUntil = 0;
     private volatile String hostMessageText = null;
     private volatile long hostMessageFlashUntil = 0;
@@ -223,6 +227,7 @@ public class GnomeballPlugin extends Plugin
         tileReducer   = new TileReducer();
         cheerleaderRenderer = new CheerleaderRenderer(client, clientThread, this);
         goalpostRenderer = new GoalpostRenderer(client, clientThread);
+        flagRenderer = new FlagRenderer(client, clientThread);
         loadCustomFieldSlots();
         loadHostedGameKeys();
 
@@ -278,6 +283,7 @@ public class GnomeballPlugin extends Plugin
         if (navButton != null) clientToolbar.removeNavigation(navButton);
         if (cheerleaderRenderer != null) cheerleaderRenderer.clear();
         if (goalpostRenderer != null) goalpostRenderer.clear();
+        if (flagRenderer != null) flagRenderer.clear();
         resetState();
     }
 
@@ -321,7 +327,7 @@ public class GnomeballPlugin extends Plugin
             tagObligationTagger = null;
             tagImmunePlayer = null; tagImmuneUntil = 0;
             obligationActive = false; obligationTeam = null; obligationKind = null;
-            goalFlashUntil = 0; goalFlashTeam = null; goalFlashOldScore = 0; goalFlashNewScore = 0;
+            goalFlashQueue.clear();
             interceptionFlashUntil = 0; interceptionPlayer = null; interceptionTeam = null;
             outOfBoundsFlashUntil = 0;
             hostMessageText = null; hostMessageFlashUntil = 0;
@@ -331,6 +337,7 @@ public class GnomeballPlugin extends Plugin
             if (tileReducer != null) tileReducer.reset();
             if (cheerleaderRenderer != null) cheerleaderRenderer.clear();
             if (goalpostRenderer != null) goalpostRenderer.clear();
+            if (flagRenderer != null) flagRenderer.clear();
             SwingUtilities.invokeLater(() -> panel.refresh());
         }
     }
@@ -340,6 +347,11 @@ public class GnomeballPlugin extends Plugin
     {
         filterOffRosterPlayerEntry(event);
         colorizeRosterPlayerEntry(event);
+
+        if ("Walk here".equals(event.getOption()) && canFlagTiles() && !presetPlacementMode && !presetRemovalMode)
+        {
+            addFlagTileMenuEntry();
+        }
 
         if (!isHost()) return;
         if (phase != GamePhase.LOBBY && phase != GamePhase.ACTIVE) return;
@@ -459,6 +471,7 @@ public class GnomeballPlugin extends Plugin
         {
             cheerleaderRenderer.sync(tileReducer.snapshot());
             goalpostRenderer.sync(tileReducer.snapshot());
+            flagRenderer.sync(tileReducer.snapshot());
         }
 
         if (phase != GamePhase.ACTIVE || timerPaused || ballHolder == null) return;
@@ -496,6 +509,13 @@ public class GnomeballPlugin extends Plugin
         }
     }
 
+    /** Arms a goal notification, queuing it behind whatever's currently showing rather than
+     * clobbering it -- see {@link GoalFlashQueue}. Safe to call from any thread. */
+    private void queueGoalFlash(String team, int oldScore, int newScore)
+    {
+        goalFlashQueue.enqueue(team, oldScore, newScore, System.currentTimeMillis());
+    }
+
     private void onZoneScore(String scoringTeam, WorldPoint pos)
     {
         int oldScore = "TEAM_A".equals(scoringTeam) ? teamAScore : teamBScore;
@@ -505,10 +525,7 @@ public class GnomeballPlugin extends Plugin
         // exclusively in the GOAL_SCORED event handler (below), once the server echoes this
         // goal back over the poll. GOAL_SCORED is a delta, so applying it here too would
         // double-count on the scorer's own client once that echo arrives.
-        goalFlashTeam     = scoringTeam;
-        goalFlashOldScore = oldScore;
-        goalFlashNewScore = newScore;
-        goalFlashUntil    = System.currentTimeMillis() + 3000;
+        queueGoalFlash(scoringTeam, oldScore, newScore);
         obligationActive = true;
         obligationTeam = scoringTeam;
         obligationKind = "GOAL";
@@ -784,6 +801,16 @@ public class GnomeballPlugin extends Plugin
             return;
         }
 
+        // Nor while already owing a *previous* tag delivery -- without this, re-tackling a ball
+        // holder who hasn't yet returned the ball to the first tagger just overwrites
+        // tagObligationTagger with the new tagger, repeatedly re-arming the obligation instead of
+        // it firing once.
+        if (tagObligationTagger != null)
+        {
+            debugTag("Ignored: already owes a tag delivery to " + tagObligationTagger);
+            return;
+        }
+
         // Brief immunity after receiving the ball back from a fulfilled tag
         if (tagImmunePlayer != null && tagImmunePlayer.equalsIgnoreCase(selfRsn) && System.currentTimeMillis() < tagImmuneUntil)
         {
@@ -996,6 +1023,152 @@ public class GnomeballPlugin extends Plugin
             .onClick(me -> toggleTile(wp, "CHEERLEADER_B"));
     }
 
+    // -------------------------------------------------------------------------
+    // Referee flags
+    // -------------------------------------------------------------------------
+
+    // All flag entries use the referee role color -- they're referee-only actions.
+    private static final String FLAG_TILE_OPTION = "<col=" + COLOR_REFEREE + ">Flag Tile</col>";
+    private static final String REMOVE_FLAG_OPTION = "<col=" + COLOR_REFEREE + ">Remove Flag</col>";
+    // The entry injected for the flag *model's* clickbox (see addHoveredFlagMenuEntry) is split
+    // into option "Remove" + target "Flag" so it reads "Remove Flag" same as the tile-based entry.
+    // The exact option+target pair is also what lets onMenuOpened tell it apart from the
+    // tile-based "Remove Flag" addFlagTileMenuEntry adds (which has an empty target).
+    private static final String REMOVE_FLAG_MODEL_OPTION = "<col=" + COLOR_REFEREE + ">Remove</col>";
+    private static final String FLAG_MODEL_TARGET = "<col=" + COLOR_REFEREE + ">Flag</col>";
+
+    /** Referees place/remove flags (server-checked for real via flag-tile's own require_referee);
+     * the host can always clear them all from Host Controls regardless. */
+    private boolean canFlagTiles()
+    {
+        return gameId != null && playerToken != null && isReferee()
+            && (phase == GamePhase.LOBBY || phase == GamePhase.ACTIVE);
+    }
+
+    /** "Flag Tile" on an unflagged tile, "Remove Flag" on a flagged one -- added off the tile's
+     * own "Walk here" entry, so it's there on any ground tile. */
+    private void addFlagTileMenuEntry()
+    {
+        Tile tile = client.getTopLevelWorldView().getSelectedSceneTile();
+        if (tile == null) return;
+        WorldPoint wp = tile.getWorldLocation();
+        if (wp == null) return;
+
+        boolean flagged = tileReducer.hasMarker(wp, TileReducer.FLAG);
+        client.createMenuEntry(-1)
+            .setOption(flagged ? REMOVE_FLAG_OPTION : FLAG_TILE_OPTION)
+            .setTarget("")
+            .setType(MenuAction.RUNELITE)
+            .onClick(me -> { if (flagged) onUnflagTile(wp); else onFlagTile(wp); });
+    }
+
+    /** Advances the flag beads' bob (see FlagRenderer#animate), then -- whenever the mouse rests
+     * on a flag bead's real clickbox -- speculatively injects
+     * the "Remove Flag" entry onMenuOpened would commit for real, purely so the client's own
+     * top-left hover hint shows it before the referee's even right-clicked. Skipped while a menu's
+     * already open -- nothing to speculatively add once a real menu build is underway. */
+    @Subscribe
+    public void onClientTick(ClientTick event)
+    {
+        flagRenderer.animate();
+        if (client.isMenuOpen()) return;
+        addHoveredFlagMenuEntry(client.getMouseCanvasPosition());
+    }
+
+    /** The definitive, click-time version of onClientTick's speculative injection -- a
+     * RuneLiteObject has no native menu at all, so this is the only way right-clicking the flag
+     * model itself can work. Strips whatever onClientTick left in this menu snapshot first so the
+     * entry never shows twice. Reads/writes via client.getMenu(), not the event's own same-named
+     * setter -- that one only mutates the event instance, never the live menu. */
+    @Subscribe
+    public void onMenuOpened(MenuOpened event)
+    {
+        List<MenuEntry> kept = new ArrayList<>();
+        for (MenuEntry entry : client.getMenu().getMenuEntries())
+        {
+            if (entry.getType() != MenuAction.RUNELITE
+                || !REMOVE_FLAG_MODEL_OPTION.equals(entry.getOption())
+                || !FLAG_MODEL_TARGET.equals(entry.getTarget()))
+            {
+                kept.add(entry);
+            }
+        }
+        client.getMenu().setMenuEntries(kept.toArray(new MenuEntry[0]));
+
+        addHoveredFlagMenuEntry(client.getMouseCanvasPosition());
+    }
+
+    /** Shared by onClientTick/onMenuOpened so the speculative and definitive injections can never
+     * drift apart. Skipped when the hovered flag stands on the very tile under the mouse -- that
+     * tile's own "Walk here" already got a tile-based "Remove Flag" from addFlagTileMenuEntry. */
+    private void addHoveredFlagMenuEntry(Point canvasPoint)
+    {
+        if (!canFlagTiles()) return;
+        WorldPoint flag = flagRenderer.hoveredFlag(canvasPoint);
+        if (flag == null) return;
+
+        Tile selected = client.getTopLevelWorldView().getSelectedSceneTile();
+        if (selected != null && flag.equals(selected.getWorldLocation())) return;
+
+        client.createMenuEntry(-1)
+            .setOption(REMOVE_FLAG_MODEL_OPTION)
+            .setTarget(FLAG_MODEL_TARGET)
+            .setType(MenuAction.RUNELITE)
+            .onClick(me -> onUnflagTile(flag));
+    }
+
+    private void onFlagTile(WorldPoint wp)
+    {
+        final String gid = gameId;
+        final String rsn = localRsn();
+        final String token = playerToken;
+        if (gid == null || rsn == null || token == null) return;
+        executor.submit(() ->
+        {
+            try { apiClient.flagTile(gid, rsn, token, wp.getX(), wp.getY(), wp.getPlane()); }
+            catch (Exception e) { addChatMessage("Couldn't flag tile: " + e.getMessage()); }
+        });
+    }
+
+    private void onUnflagTile(WorldPoint wp)
+    {
+        final String gid = gameId;
+        final String rsn = localRsn();
+        final String token = playerToken;
+        if (gid == null || rsn == null || token == null) return;
+        executor.submit(() ->
+        {
+            try { apiClient.unflagTile(gid, rsn, token, wp.getX(), wp.getY(), wp.getPlane()); }
+            catch (Exception ignored) { }
+        });
+    }
+
+    /** Host-only: removes every flag in one unmark-tiles call, scoped to tileType FLAG so the
+     * field/zone tiles sharing any of those positions are left alone. */
+    public void onRemoveFlagsClicked()
+    {
+        if (!isHost() || gameId == null) return;
+        List<WorldPoint> flags = tileReducer.flagPoints();
+        if (flags.isEmpty()) return;
+
+        List<ApiClient.PointSpec> pointSpecs = new ArrayList<>(flags.size());
+        for (WorldPoint wp : flags)
+        {
+            pointSpecs.add(new ApiClient.PointSpec(wp.getX(), wp.getY(), wp.getPlane(), TileReducer.FLAG));
+        }
+
+        final String gid = gameId;
+        final String key = writeKey;
+        executor.submit(() ->
+        {
+            try { apiClient.unmarkTiles(gid, key, pointSpecs); }
+            catch (Exception ignored) { }
+        });
+        addChatMessage("Removing " + flags.size() + (flags.size() == 1 ? " flag." : " flags."));
+    }
+
+    public boolean hasFlags() { return !tileReducer.flagPoints().isEmpty(); }
+
     private void toggleTile(WorldPoint wp, String tileType)
     {
         if (tileReducer.hasMarker(wp, tileType))
@@ -1051,6 +1224,17 @@ public class GnomeballPlugin extends Plugin
 
         switch (type)
         {
+            case "TILE_MARKED":
+            {
+                // One-shot "a flag just went down here" burst -- the flag model itself is what
+                // persists (see FlagRenderer#sync).
+                if (TileReducer.FLAG.equals(safeStr(e.payload, "tileType")))
+                {
+                    flagRenderer.playPlacedSpotanim(new WorldPoint(
+                        safeInt(e.payload, "x"), safeInt(e.payload, "y"), safeInt(e.payload, "plane")));
+                }
+                break;
+            }
             case "GAME_STARTED":
             {
                 phase = GamePhase.ACTIVE;
@@ -1085,32 +1269,14 @@ public class GnomeballPlugin extends Plugin
             }
             case "SCORE_UPDATED":
             {
-                // Absolute score set — host correction (scoreboard +/- buttons) only.
-                // Never implies a goal was scored, so it does not arm the obligation.
+                // Absolute score set — host correction (scoreboard +/- buttons) only. Never
+                // implies a goal was scored, so it neither arms the obligation nor shows the
+                // "GOAL!" flash -- that's reserved for an actual player reaching the zone
+                // (onZoneScore's optimistic flash / the GOAL_SCORED case below confirming it).
                 String team = safeStr(e.payload, "team");
                 int score = safeInt(e.payload, "score");
-                if ("TEAM_A".equals(team))
-                {
-                    if (score > teamAScore)
-                    {
-                        goalFlashTeam = "TEAM_A";
-                        goalFlashOldScore = teamAScore;
-                        goalFlashNewScore = score;
-                        goalFlashUntil = System.currentTimeMillis() + 3000;
-                    }
-                    teamAScore = score;
-                }
-                else if ("TEAM_B".equals(team))
-                {
-                    if (score > teamBScore)
-                    {
-                        goalFlashTeam = "TEAM_B";
-                        goalFlashOldScore = teamBScore;
-                        goalFlashNewScore = score;
-                        goalFlashUntil = System.currentTimeMillis() + 3000;
-                    }
-                    teamBScore = score;
-                }
+                if ("TEAM_A".equals(team)) teamAScore = score;
+                else if ("TEAM_B".equals(team)) teamBScore = score;
                 break;
             }
             case "GOAL_SCORED":
@@ -1120,17 +1286,11 @@ public class GnomeballPlugin extends Plugin
                 String team = safeStr(e.payload, "team");
                 if ("TEAM_A".equals(team))
                 {
-                    goalFlashTeam = "TEAM_A";
-                    goalFlashOldScore = teamAScore;
-                    goalFlashNewScore = ++teamAScore;
-                    goalFlashUntil = System.currentTimeMillis() + 3000;
+                    queueGoalFlash("TEAM_A", teamAScore, ++teamAScore);
                 }
                 else if ("TEAM_B".equals(team))
                 {
-                    goalFlashTeam = "TEAM_B";
-                    goalFlashOldScore = teamBScore;
-                    goalFlashNewScore = ++teamBScore;
-                    goalFlashUntil = System.currentTimeMillis() + 3000;
+                    queueGoalFlash("TEAM_B", teamBScore, ++teamBScore);
                 }
                 obligationActive = true;
                 obligationTeam = team;
@@ -1378,20 +1538,14 @@ public class GnomeballPlugin extends Plugin
         rosterReducer.syncFromRoster(snap.players);
         if (snap.teamAName != null) teamAName = snap.teamAName;
         if (snap.teamBName != null) teamBName = snap.teamBName;
-        if (snap.teamAScore > teamAScore)
-        {
-            goalFlashTeam = "TEAM_A";
-            goalFlashOldScore = teamAScore;
-            goalFlashNewScore = snap.teamAScore;
-            goalFlashUntil = System.currentTimeMillis() + 3000;
-        }
-        if (snap.teamBScore > teamBScore)
-        {
-            goalFlashTeam = "TEAM_B";
-            goalFlashOldScore = teamBScore;
-            goalFlashNewScore = snap.teamBScore;
-            goalFlashUntil = System.currentTimeMillis() + 3000;
-        }
+        // No goal flash here, deliberately -- this snapshot sync runs on join, on resume, and as
+        // a roster-membership catch-up poll, none of which mean "a player just reached the zone."
+        // A score increase seen here could just as easily be a host's manual correction (or, on
+        // join/resume, simply the game's already-existing score being loaded for the first time)
+        // as it could a missed real goal -- there's no way to tell which from a bare score diff,
+        // so this only ever silently syncs the number. The actual "GOAL!" flash comes from
+        // onZoneScore's optimistic local trigger and the GOAL_SCORED event case below, both of
+        // which know for certain a real zone-entry caused it.
         teamAScore = snap.teamAScore;
         teamBScore = snap.teamBScore;
         if (snap.ballHolder != null) ballHolder = snap.ballHolder;
@@ -1591,7 +1745,7 @@ public class GnomeballPlugin extends Plugin
     public void onClearArenaClicked()
     {
         if (!isHost() || gameId == null) return;
-        List<TileReducer.TileEntry> snapshot = tileReducer.snapshot();
+        List<TileReducer.TileEntry> snapshot = tileReducer.fieldSnapshot();
         if (snapshot.isEmpty())
         {
             addChatMessage("No field tiles to clear.");
@@ -1618,6 +1772,24 @@ public class GnomeballPlugin extends Plugin
             specs.add(new ApiClient.PointSpec(wp.getX(), wp.getY(), wp.getPlane(), null));
         }
         return specs;
+    }
+
+    /** Referee-only: forcibly removes a player from the roster (fires the same PLAYER_LEFT event
+     * their own "Leave Game" button would). Exists so a disconnected player's stuck team slot
+     * (they never got to click Leave -- crash, relog, logout) can be freed without waiting for
+     * them, and so a rogue player can be booted from an in-progress game. */
+    public void onKickPlayerClicked(String targetRsn)
+    {
+        if (!isReferee()) return;
+        final String gid = gameId;
+        final String rsn = localRsn();
+        if (gid == null || rsn == null) return;
+        final String token = playerToken;
+        executor.submit(() ->
+        {
+            try { apiClient.kickPlayer(gid, rsn, targetRsn, token); }
+            catch (Exception ignored) { }
+        });
     }
 
     public void onAssignBallClicked(String playerRsn)
@@ -1650,6 +1822,7 @@ public class GnomeballPlugin extends Plugin
     public long          getDeadlineMs() { return deadlineMs; }
     public String        getWinner()     { return winner; }
     public boolean       isHost()        { return writeKey != null; }
+    public String        getLocalRsn()   { return localRsn(); }
     public RosterReducer getRoster()     { return rosterReducer; }
     public GnomeballConfig getConfig()   { return config; }
     public String        getTeamAName()  { return teamAName; }
@@ -1704,7 +1877,7 @@ public class GnomeballPlugin extends Plugin
     public void saveCurrentFieldToCustomSlot(int index)
     {
         if (index < 0 || index >= CUSTOM_SLOT_COUNT) return;
-        List<TileReducer.TileEntry> snapshot = tileReducer.snapshot();
+        List<TileReducer.TileEntry> snapshot = tileReducer.fieldSnapshot();
         if (snapshot.isEmpty())
         {
             addChatMessage("No field tiles to save.");
@@ -1779,10 +1952,11 @@ public class GnomeballPlugin extends Plugin
         configManager.setRSProfileConfiguration(CONFIG_GROUP, KEY_HOSTED_GAMES, gson.toJson(hostedGameKeys));
     }
 
-    public long          getGoalFlashUntil()    { return goalFlashUntil; }
-    public String        getGoalFlashTeam()     { return goalFlashTeam; }
-    public int           getGoalFlashOldScore() { return goalFlashOldScore; }
-    public int           getGoalFlashNewScore() { return goalFlashNewScore; }
+    public long           getGoalFlashUntil()    { GoalFlashQueue.Flash f = currentGoalFlash(); return f == null ? 0 : f.until(); }
+    public String         getGoalFlashTeam()     { GoalFlashQueue.Flash f = currentGoalFlash(); return f == null ? null : f.team; }
+    public int            getGoalFlashOldScore() { GoalFlashQueue.Flash f = currentGoalFlash(); return f == null ? 0 : f.oldScore; }
+    public int            getGoalFlashNewScore() { GoalFlashQueue.Flash f = currentGoalFlash(); return f == null ? 0 : f.newScore; }
+    private GoalFlashQueue.Flash currentGoalFlash() { return goalFlashQueue.current(System.currentTimeMillis()); }
     public long          getWhistleFlashUntil() { return whistleFlashUntil; }
     public String        getHostMessageText()      { return hostMessageText; }
     public long          getHostMessageFlashUntil() { return hostMessageFlashUntil; }
@@ -1990,6 +2164,7 @@ public class GnomeballPlugin extends Plugin
         if (tileReducer != null) tileReducer.reset();
         if (cheerleaderRenderer != null) cheerleaderRenderer.clear();
         if (goalpostRenderer != null) goalpostRenderer.clear();
+        if (flagRenderer != null) flagRenderer.clear();
     }
 
     private void loadTiles()

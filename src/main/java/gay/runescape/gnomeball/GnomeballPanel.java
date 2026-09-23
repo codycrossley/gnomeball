@@ -62,6 +62,7 @@ public class GnomeballPanel extends PluginPanel
     private final JButton saveFieldBtn = new JButton("Save");
 
     private final JButton clearArenaBtn = new JButton("Clear Current Arena");
+    private final JButton removeFlagsBtn = new JButton("Remove Flags");
 
     // Host pre-start (LOBBY only, within host card)
     private final JPanel hostPreStartPanel = new JPanel();
@@ -443,6 +444,13 @@ public class GnomeballPanel extends PluginPanel
             plugin.onClearArenaClicked();
         });
         hostControlsCard.add(clearArenaBtn);
+        hostControlsCard.add(Box.createVerticalStrut(4));
+
+        // Clears every referee-placed flag, leaving the field itself untouched.
+        removeFlagsBtn.setAlignmentX(LEFT_ALIGNMENT);
+        removeFlagsBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        removeFlagsBtn.addActionListener(e -> plugin.onRemoveFlagsClicked());
+        hostControlsCard.add(removeFlagsBtn);
         hostControlsCard.add(Box.createVerticalStrut(8));
 
         // Setup sub-group (LOBBY only): duration + start
@@ -672,7 +680,11 @@ public class GnomeballPanel extends PluginPanel
             row.add(numLabel);
             row.add(nameLabel);
 
-            if (plugin.isHost())
+            // Host gets the full role/ball management menu (those actions run on the host's write
+            // key). A referee who isn't the host still gets the menu too, but only for the kick
+            // entry inside it -- see buildRolePopup -- since kicking authenticates as the referee's
+            // own session token rather than the write key.
+            if (plugin.isHost() || plugin.isReferee())
             {
                 JPopupMenu popup = buildRolePopup(entry.rsn, entry.role);
                 attachPopup(row, popup);
@@ -696,33 +708,60 @@ public class GnomeballPanel extends PluginPanel
     {
         JPopupMenu popup = new JPopupMenu();
 
-        if (plugin.getPhase() == GamePhase.ACTIVE)
+        // Ball/role management runs on the host's write key, so only actually offer it to the
+        // host -- a non-host referee opening this same popup (see refreshRoster) only gets the
+        // Kick Player entry below, added regardless of host status.
+        if (plugin.isHost())
         {
-            String bh = plugin.getBallHolder();
-            boolean hasBall = bh != null && bh.equalsIgnoreCase(rsn);
-            if (hasBall)
+            if (plugin.getPhase() == GamePhase.ACTIVE)
             {
-                JMenuItem removeBall = new JMenuItem("Remove Ball");
-                removeBall.addActionListener(e -> plugin.onClearBallClicked());
-                popup.add(removeBall);
+                String bh = plugin.getBallHolder();
+                boolean hasBall = bh != null && bh.equalsIgnoreCase(rsn);
+                if (hasBall)
+                {
+                    JMenuItem removeBall = new JMenuItem("Remove Ball");
+                    removeBall.addActionListener(e -> plugin.onClearBallClicked());
+                    popup.add(removeBall);
+                }
+                else
+                {
+                    JMenuItem assignBall = new JMenuItem("Assign Ball");
+                    assignBall.addActionListener(e -> plugin.onAssignBallClicked(rsn));
+                    popup.add(assignBall);
+                }
+                popup.addSeparator();
             }
-            else
+
+            for (GnomeballRole role : GnomeballRole.values())
             {
-                JMenuItem assignBall = new JMenuItem("Assign Ball");
-                assignBall.addActionListener(e -> plugin.onAssignBallClicked(rsn));
-                popup.add(assignBall);
+                if (role == current) continue;
+                JMenuItem item = new JMenuItem("Switch to " + roleDisplayName(role));
+                item.setForeground(roleColor(role));
+                item.addActionListener(e -> plugin.onAssignRoleClicked(rsn, role));
+                popup.add(item);
             }
-            popup.addSeparator();
         }
 
-        for (GnomeballRole role : GnomeballRole.values())
+        // Kick is referee-gated server-side (authenticates as the kicking referee's own session
+        // token, not the write key), so any referee sees it here -- not just the host. Frees a
+        // slot a disconnected player left stuck without waiting for them, or removes a rogue
+        // player. Not offered against yourself -- use Leave Game for that.
+        String localRsn = plugin.getLocalRsn();
+        if (plugin.isReferee() && (localRsn == null || !rsn.equalsIgnoreCase(localRsn)))
         {
-            if (role == current) continue;
-            JMenuItem item = new JMenuItem("Switch to " + roleDisplayName(role));
-            item.setForeground(roleColor(role));
-            item.addActionListener(e -> plugin.onAssignRoleClicked(rsn, role));
-            popup.add(item);
+            if (popup.getComponentCount() > 0) popup.addSeparator();
+            JMenuItem kick = new JMenuItem("Kick " + rsn);
+            kick.setForeground(Color.RED);
+            kick.addActionListener(e ->
+            {
+                int choice = JOptionPane.showConfirmDialog(this,
+                    "Remove " + rsn + " from the game? They'll need to rejoin with the game code.",
+                    "Kick Player", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                if (choice == JOptionPane.YES_OPTION) plugin.onKickPlayerClicked(rsn);
+            });
+            popup.add(kick);
         }
+
         return popup;
     }
 
@@ -775,10 +814,11 @@ public class GnomeballPanel extends PluginPanel
         removePresetBtn.setText(plugin.isPresetRemovalMode() ? "Cancel" : "Remove");
         removePresetBtn.setEnabled(plugin.isPresetRemovalMode() || hasValidSelection);
 
-        boolean hasFieldTiles = !plugin.getTileReducer().snapshot().isEmpty();
+        boolean hasFieldTiles = !plugin.getTileReducer().fieldSnapshot().isEmpty();
         int slotIndex = resolveSelectedCustomSlotIndex();
         saveFieldBtn.setEnabled(slotIndex >= 0 && hasFieldTiles);
         clearArenaBtn.setEnabled(hasFieldTiles);
+        removeFlagsBtn.setEnabled(plugin.hasFlags());
     }
 
     /** Rebuilds the preset dropdown's item labels ("Custom Grid" + built-ins + custom slots,
